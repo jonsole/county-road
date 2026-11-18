@@ -55,7 +55,7 @@ function disk(radius, x, z, material, lift, level) {
   const p = mesh.geometry.attributes.position
   const uv = mesh.geometry.attributes.uv
   for (let i = 0; i < p.count; i++) {
-    uv.setXY(i, (p.getX(i) + x) / 12, (p.getZ(i) + z) / 12)
+    uv.setXY(i, (p.getX(i) + x) / 3.2, (p.getZ(i) + z) / 3.2)
     p.setY(i, (level ?? heightAt(p.getX(i) + x, p.getZ(i) + z)) + lift)
   }
   mesh.geometry.computeVertexNormals()
@@ -195,6 +195,15 @@ export function buildWorld(scene) {
     mesh.computeBoundingSphere()
     scene.add(mesh)
   }
+  // Shadows: everything on the ground receives them; trees, hedges,
+  // buildings and posts cast them (the distant trees, beyond the shadow
+  // map's reach, don't).
+  scene.traverse(object => {
+    if (!object.isMesh) return
+    object.receiveShadow = true
+    const caster = object.isInstancedMesh || object.parent === barn || object.parent === tower
+    if (caster && (!object.isInstancedMesh || object.boundingSphere.radius < 3000)) object.castShadow = true
+  })
   const fresh = new T.Color(0x8fae58)
   const bareTwigs = new T.Color(0x6b6158)
   return {
@@ -234,7 +243,7 @@ export function buildCar(scene) {
   const body = new T.Group()
   root.add(body)
   scene.add(root)
-  addContactShadow(root, 4, 6.6, 0.74, -0.24, 0.12)
+  addContactShadow(root, 4, 6.6, 0.45, -0.24, 0.12) // (soft shade under it; the sun's shadow is the shadow map's)
   const red = new T.MeshStandardMaterial({ color: 0xc54e31, metalness: 0.32, roughness: 0.32 })
   const glass = new T.MeshStandardMaterial({ color: 0x203337, metalness: 0.38, roughness: 0.18 })
   const trim = matte(0x242729)

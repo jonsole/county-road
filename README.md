@@ -46,6 +46,8 @@ The code is in `sky.js`, `weather.js`, `landscape.js`, `glare.js`, and `skySetti
 
 Each tire samples its own contact surface. Asphalt has sharper turn-in and stronger traction. Grass builds cornering force more slowly, adds rolling drag, and loses more grip at speed and when sliding.
 
+Surface textures (asphalt, grass, mud, gravel, paving) are CC0 photographs from [Poly Haven](https://polyhaven.com); see `public/textures/CREDITS.txt`. The sun and moon cast real shadows around the car.
+
 Run `npm test` for simulation and input checks, and `npm run build` for the static build.
 
 GitHub Actions tests and builds the game on pushes to `main`, then publishes it to GitHub Pages.

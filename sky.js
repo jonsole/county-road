@@ -381,6 +381,9 @@ export function addCloudShadows(material) {
 
 // --- The whole sky -------------------------------------------------------------
 
+const ORIGIN = new T.Vector3()
+const UP = new T.Vector3(0, 1, 0)
+const NORTH = new T.Vector3(0, 0, 1)
 const _mist = new T.Color()
 const _cloudTop = new T.Color()
 const _cloudSun = new T.Color()
@@ -389,7 +392,7 @@ const _cloudSun = new T.Color()
  * Build the sky, lights, haze and weather in a scene. Call setOptions with
  * the settings (sky options), and update(dt, camera) every frame.
  */
-export function createSky(scene, { haze = 0.0006, far = 4000 } = {}) {
+export function createSky(scene, { haze = 0.0006, far = 4000, shadowMap = 2048 } = {}) {
   // Haze, mist and low cloud in every material's fog (weather.js).
   installVolumetricFog(haze)
   scene.background = new T.Color('#9cc3e6')
@@ -406,6 +409,21 @@ export function createSky(scene, { haze = 0.0006, far = 4000 } = {}) {
   const hemi = new T.HemisphereLight('#cfe3ff', '#4d5a33', 1.1)
   const sun = new T.DirectionalLight('#fff3df', 2.6)
   scene.add(hemi, sun, sun.target)
+  // Shadows from the sun (or moon): a map about 150 m across that follows
+  // the car, sharp near it, redrawn every frame so its own shadow moves.
+  const SHADOW_HALF = 75
+  if (shadowMap) {
+    sun.castShadow = true
+    sun.shadow.mapSize.set(shadowMap, shadowMap)
+    Object.assign(sun.shadow.camera, { left: -SHADOW_HALF, right: SHADOW_HALF, top: SHADOW_HALF, bottom: -SHADOW_HALF, near: 1, far: 700 })
+    sun.shadow.camera.updateProjectionMatrix()
+    sun.shadow.bias = -0.0004
+    sun.shadow.normalBias = 0.06
+    sun.shadow.radius = 3
+  }
+  const shadowCentre = new T.Vector3()
+  const lightSpace = new T.Matrix4()
+  const lightInverse = new T.Matrix4()
 
   const lowCloud = new LowCloud()
   const sunDir = new T.Vector3()
@@ -527,7 +545,7 @@ export function createSky(scene, { haze = 0.0006, far = 4000 } = {}) {
    * (the haze thickens and greys, the sky and high clouds fade into it,
    * the sun dims; inside a cloud you see a few tens of metres).
    */
-  function update(dt, camera, groundY = 0) {
+  function update(dt, camera, groundY = 0, focus = camera.position) {
     const o = cloudUniforms.cloudOffset.value
     const aloft = CLOUD_TYPES.cirrus.height === cloudUniforms.cloudHeight.value ? 3.5 : 1.8
     o.x -= wind.x * aloft * dt
@@ -536,8 +554,18 @@ export function createSky(scene, { haze = 0.0006, far = 4000 } = {}) {
     night.position.copy(camPos)
     clouds.mesh.position.x = camPos.x
     clouds.mesh.position.z = camPos.z
-    sun.target.position.copy(camPos)
-    sun.position.copy(camPos).addScaledVector(lightDir, 100)
+    // Centre the shadow map on the focus (the car), snapped to whole shadow
+    // pixels in the light's own frame, so edges don't shimmer as it moves.
+    const texel = (2 * SHADOW_HALF) / sun.shadow.mapSize.x
+    lightSpace.lookAt(lightDir, ORIGIN, Math.abs(lightDir.y) > 0.99 ? NORTH : UP)
+    lightInverse.copy(lightSpace).invert()
+    shadowCentre.copy(focus).applyMatrix4(lightInverse)
+    shadowCentre.x = Math.round(shadowCentre.x / texel) * texel
+    shadowCentre.y = Math.round(shadowCentre.y / texel) * texel
+    shadowCentre.applyMatrix4(lightSpace)
+    sun.target.position.copy(shadowCentre)
+    sun.position.copy(shadowCentre).addScaledVector(lightDir, 300)
+    sun.target.updateMatrixWorld()
 
     lowCloud.update(dt, wind)
     const w = state.weather

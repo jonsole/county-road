@@ -1,94 +1,16 @@
 // Drawing the land (its shape: terrain.js). The ground shader is ported
-// from RC Flight Sim (src/world/ground.js): grass at two scales, close-up
-// blades, and beyond the drivable area a patchwork of farm fields with
-// hedgerows. Steep banks and cuttings show bare earth.
+// from RC Flight Sim (src/world/ground.js) and drawn with photographic
+// textures (textures.js): two grasses blended so no repeat shows, with their
+// bumps (normal maps); beyond the drivable area a patchwork of farm fields
+// with hedgerows; steep banks and cuttings show bare mud.
 import * as T from 'three'
 import { addCloudShadows } from './sky.js'
 import { FLAT_EDGE, POND, groundGrid, natural } from './terrain.js'
+import { TEX } from './textures.js'
 
 export { FLAT_EDGE, heightAt } from './terrain.js'
 export const TERRAIN_SIZE = 7200
 const OUTER_CELL = 20
-
-function grassTexture() {
-  // 6 m of lawn: an even mid green with fine, low-contrast blade strokes,
-  // so from a distance it reads as smooth grass, not camouflage.
-  const N = 512
-  const c = document.createElement('canvas')
-  c.width = c.height = N
-  const ctx = c.getContext('2d')
-  let seed = 3
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
-  ctx.fillStyle = '#6a8c3e'
-  ctx.fillRect(0, 0, N, N)
-  ctx.lineCap = 'round'
-  for (let i = 0; i < 30000; i++) {
-    const x = rnd() * N
-    const y = rnd() * N
-    const len = 1.5 + rnd() * 3.5
-    const a = -Math.PI / 2 + (rnd() - 0.5) * 1.2
-    const l = 30 + rnd() * 16
-    ctx.strokeStyle = `hsla(${80 + rnd() * 16}, ${36 + rnd() * 14}%, ${l}%, 0.55)`
-    ctx.lineWidth = 0.8 + rnd() * 0.6
-    ctx.beginPath()
-    ctx.moveTo(x, y)
-    ctx.lineTo(x + Math.cos(a) * len, y + Math.sin(a) * len)
-    ctx.stroke()
-  }
-  const t = new T.CanvasTexture(c)
-  t.wrapS = t.wrapT = T.RepeatWrapping
-  t.colorSpace = T.SRGBColorSpace
-  t.anisotropy = 8
-  return t
-}
-
-/**
- * Close-up grass: a metre of blades as brightness (0.5 = no change), laid
- * over the ground near the camera so close up you see blades.
- */
-function grassFineTexture() {
-  const N = 512
-  const c = document.createElement('canvas')
-  c.width = c.height = N
-  const g = c.getContext('2d')
-  let seed = 11
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647)
-  g.fillStyle = 'rgb(92, 96, 88)'
-  g.fillRect(0, 0, N, N)
-  g.lineCap = 'round'
-  for (let i = 0; i < 14000; i++) {
-    const k = i / 14000
-    const x = rnd() * N
-    const y = rnd() * N
-    const len = 6 + rnd() * 14 + k * 8
-    const a = rnd() * Math.PI * 2
-    const v = 104 + k * 50 + rnd() * 30
-    const yel = rnd() * 14
-    g.strokeStyle = `rgb(${Math.round(v + yel)}, ${Math.round(v + 4)}, ${Math.round(v - 10 - yel)})`
-    g.lineWidth = 1.6 + rnd() * 1.8
-    // Drawn wrapping round the edges so the tile repeats seamlessly.
-    for (const ox of [-N, 0, N]) {
-      for (const oy of [-N, 0, N]) {
-        const x0 = x + ox
-        const y0 = y + oy
-        if (x0 < -40 || x0 > N + 40 || y0 < -40 || y0 > N + 40) continue
-        g.beginPath()
-        g.moveTo(x0, y0)
-        g.quadraticCurveTo(x0 + Math.cos(a) * len * 0.6 + 2, y0 + Math.sin(a) * len * 0.6, x0 + Math.cos(a) * len, y0 + Math.sin(a) * len)
-        g.stroke()
-      }
-    }
-  }
-  const px = g.getImageData(0, 0, N, N).data
-  let sum = 0
-  for (let i = 0; i < px.length; i += 4) sum += px[i] + px[i + 1] + px[i + 2]
-  const mean = sum / (px.length / 4) / 3 / 255
-  const tex = new T.CanvasTexture(c)
-  tex.wrapS = tex.wrapT = T.RepeatWrapping
-  tex.colorSpace = T.NoColorSpace
-  tex.anisotropy = 8
-  return { tex, mean }
-}
 
 /** Grass for the season (weather.js seasonFor), shared by the ground's shader. */
 export const groundUniforms = {
@@ -122,25 +44,34 @@ float gFbm(vec2 p) {
 
 /** Add the per-pixel ground detail to the terrain's material. */
 function addGroundDetail(material) {
-  const fine = grassFineTexture()
   const edge = FLAT_EDGE.toFixed(1)
+  // (Sets USE_NORMALMAP for three.js's tangent-frame code; the shader samples its own maps.)
+  material.normalMap = TEX.grass.normal
   material.onBeforeCompile = shader => {
-    shader.uniforms.grassFine = { value: fine.tex }
-    shader.uniforms.grassFineMean = { value: fine.mean }
-    Object.assign(shader.uniforms, groundUniforms)
+    Object.assign(shader.uniforms, groundUniforms, {
+      grassA: { value: TEX.grass.color }, grassB: { value: TEX['grass-patchy'].color },
+      grassNA: { value: TEX.grass.normal }, grassNB: { value: TEX['grass-patchy'].normal },
+      mudMap: { value: TEX.mud.color }, mudN: { value: TEX.mud.normal },
+    })
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGroundWorld;\nvarying vec3 vGroundNormal;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGroundWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvGroundNormal = normalize(mat3(modelMatrix) * objectNormal);')
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${GLSL}\nuniform sampler2D grassFine;\nuniform float grassFineMean;\nuniform vec3 uGrassTint;\nuniform float uGrassDry;\nuniform float uGrassLen;`)
+      .replace('#include <common>', `#include <common>\n${GLSL}\nuniform sampler2D grassA, grassB, grassNA, grassNB, mudMap, mudN;\nuniform vec3 uGrassTint;\nuniform float uGrassDry;\nuniform float uGrassLen;`)
       .replace('#include <map_fragment>', /* glsl */ `
         vec2 p = vGroundWorld.xz;
-        // Grass texture at two scales and angles, blended by a slow noise,
-        // so no repeat pattern shows.
-        vec2 q = p / 6.0;
-        vec2 uvB = vec2(q.x * 0.81 - q.y * 0.59, q.x * 0.59 + q.y * 0.81) * 0.43 + 0.37;
-        float mixAB = smoothstep(0.3, 0.7, gNoise(p / 37.0));
-        vec3 g = mix(texture2D(map, q).rgb, texture2D(map, uvB).rgb, mixAB);
+        // Two photographed grasses, at different scales and angles, blended
+        // by a slow noise so no repeat shows. They give the detail (blades,
+        // clumps, bare bits); the colour is held to the landscape's green.
+        vec2 q = p / 2.6;
+        vec2 uvB = vec2(p.x * 0.81 - p.y * 0.59, p.x * 0.59 + p.y * 0.81) / 3.7 + 0.37;
+        float mixAB = smoothstep(0.3, 0.7, gNoise(p / 23.0));
+        vec3 ta = texture2D(grassA, q).rgb / vec3(0.079, 0.047, 0.007);
+        vec3 tb = texture2D(grassB, uvB).rgb / vec3(0.155, 0.118, 0.048);
+        vec3 detail = mix(ta, tb, mixAB);
+        float shade = dot(detail, vec3(0.3, 0.6, 0.1));
+        vec3 g = vec3(0.144, 0.262, 0.048) * mix(vec3(shade), clamp(detail, 0.0, 3.0), 0.28) * 1.15;
+        vec3 groundNormal = mix(texture2D(grassNA, q).xyz, texture2D(grassNB, uvB).xyz, mixAB);
         // Large, soft patches of lighter and darker grass.
         g *= 0.94 + 0.12 * gFbm(p / 31.0);
 
@@ -177,34 +108,17 @@ function addGroundDetail(material) {
         float upright = normalize(vGroundNormal).y;
         float steep = smoothstep(0.86, 0.66, upright);
         if (steep > 0.0) {
-          float clods = gNoise(p / 1.3) * 0.6 + gNoise(p / 4.0) * 0.4;
-          vec3 earth = vec3(0.43, 0.35, 0.26) * (0.75 + 0.45 * clods);
-          vec3 stone = vec3(0.52, 0.5, 0.46) * (0.8 + 0.35 * gHash(floor(p * 2.0)));
-          earth = mix(earth, stone, smoothstep(0.62, 0.5, upright) * step(0.55, gNoise(p / 2.2 + 3.0)));
+          // (Mud on a bank, mapped across the slope rather than squashed by it.)
+          vec2 mq = (abs(vGroundNormal.x) > abs(vGroundNormal.z) ? vec2(p.y, vGroundWorld.y) : vec2(p.x, vGroundWorld.y)) / 2.4;
+          vec3 earth = texture2D(mudMap, mq).rgb * 1.35;
           // Grass hangs on in patches.
           float hold = smoothstep(0.35, 0.65, gNoise(p / 3.1 + 7.0) + (upright - 0.7));
-          g = mix(g, earth, steep * (1.0 - 0.7 * hold));
+          float bare = steep * (1.0 - 0.7 * hold);
+          g = mix(g, earth, bare);
+          groundNormal = mix(groundNormal, texture2D(mudN, mq).xyz, bare);
         }
 
-        // Close up: blades at two scales and angles, fading with distance.
         float grassy = smoothstep(0.0, 0.06, g.g - max(g.r, g.b));
-        {
-          float camD = length(vGroundWorld - cameraPosition);
-          float len = clamp(0.45 + 0.55 * uGrassLen, 0.0, 1.0);
-          float near = 1.0 - smoothstep(10.0, 70.0 + 50.0 * len, camD);
-          if (near > 0.0 && grassy > 0.0) {
-            vec2 r1 = vec2(p.x * 0.94 - p.y * 0.34, p.x * 0.34 + p.y * 0.94);
-            vec3 b1 = texture2D(grassFine, r1 / 0.9).rgb;
-            vec3 b2 = texture2D(grassFine, vec2(p.y, -p.x) / 0.37 + 0.31).rgb;
-            vec3 blades = mix(b1, b2, 0.4) / grassFineMean;
-            // Longer grass: big coarse blades and tufts with shadowed hollows.
-            vec3 b3 = texture2D(grassFine, vec2(p.x * 0.6 + p.y * 0.8, -p.x * 0.8 + p.y * 0.6) / 2.6 + 0.17).rgb / grassFineMean;
-            blades = mix(blades, mix(blades, b3, 0.6), len);
-            blades = 1.0 + (blades - 1.0) * mix(vec3(0.85), vec3(1.25), len);
-            float tuft = mix(0.92 + 0.16 * gNoise(p / 0.45), 0.72 + 0.56 * gNoise(p / 0.8) * gNoise(p / 2.3 + 5.0) * 1.6, len);
-            g *= mix(vec3(1.0), blades * tuft, near * grassy);
-          }
-        }
         // The season: on green ground only (hedges, crops and pasture too).
         g *= mix(vec3(1.0), uGrassTint, grassy);
         {
@@ -216,6 +130,15 @@ function addGroundDetail(material) {
         }
         diffuseColor.rgb *= g;
       `)
+      // The bumps, from the same blended maps (and the mud's on the banks).
+      .replace('#include <normal_fragment_maps>', `
+        {
+          vec3 mapN = groundNormal * 2.0 - 1.0;
+          mapN.xy *= 0.9;
+          mat3 tbn = getTangentFrame(- vViewPosition, normal, q);
+          normal = normalize(tbn * mapN);
+        }
+      `)
   }
   material.customProgramCacheKey = () => 'countyGround'
   return material
@@ -223,8 +146,7 @@ function addGroundDetail(material) {
 
 /** The ground: a fine mesh over the drivable area (from terrain.js's grid) and a coarse one beyond. */
 export function buildTerrain(scene) {
-  const map = grassTexture()
-  const material = addCloudShadows(addGroundDetail(new T.MeshLambertMaterial({ map, vertexColors: true })))
+  const material = addCloudShadows(addGroundDetail(new T.MeshLambertMaterial({ vertexColors: true })))
   const tint = groundTint()
 
   // Inside: the grid the physics uses, so they agree, with a skirt round

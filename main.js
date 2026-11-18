@@ -9,6 +9,7 @@ import { createSkySettings, loadSkySettings } from './skySettings.js'
 import { clockHours, dayOfYear, moonAge, seasonFor, weatherFor } from './weather.js'
 import { setGroundSeason } from './landscape.js'
 import { createGlare } from './glare.js'
+import { loadTextures } from './textures.js'
 import { HEDGES, POND, WOODS, heightAt, inPond, resolveTrees, slopeAt } from './terrain.js'
 
 const select = id => document.getElementById(id)
@@ -26,6 +27,8 @@ try {
   throw error
 }
 renderer.toneMapping = T.ACESFilmicToneMapping
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = T.PCFShadowMap
 view.append(renderer.domElement)
 const touch = createTouchDriving(select('game'))
 const drivingAudio = createDrivingAudio(select('open-settings'))
@@ -43,7 +46,9 @@ function resize() {
 window.addEventListener('resize', resize)
 resize()
 
-const sky = createSky(scene)
+// Phones and tablets: a smaller shadow map.
+const sky = createSky(scene, { shadowMap: matchMedia('(pointer: coarse)').matches ? 1024 : 2048 })
+await loadTextures(renderer.capabilities.getMaxAnisotropy() >= 8 ? 8 : 4)
 const world = buildWorld(scene)
 const glare = createGlare(view)
 const skySettings = loadSkySettings()
@@ -51,6 +56,9 @@ createSkySettings(select('sky-options'), skySettings, applySky)
 applySky()
 let clockTimer = 0
 const model = buildCar(scene)
+model.root.traverse(object => {
+  if (object.isMesh && !object.material.transparent) object.castShadow = true
+})
 const bindings = loadBindings()
 const settings = createSettings(bindings, updateBindingHints)
 const controls = createControls(bindings, settings.isOpen)
@@ -123,6 +131,8 @@ const previousCar = { ...car }
 const pose = {}
 let input = controls()
 let cameraYaw
+const shadowFocus = new T.Vector3()
+const lookDirection = new T.Vector3()
 let cameraHeight
 let carGround = 0
 let noticeUntil = 0
@@ -345,7 +355,8 @@ function updateSky(delta, paused) {
     clockTimer = 30
     applySky()
   }
-  sky.update(paused ? 0 : delta, camera, heightAt(camera.position.x, camera.position.z))
+  shadowFocus.set(pose.x ?? car.x, carGround, pose.z ?? car.z).addScaledVector(camera.getWorldDirection(lookDirection).setY(0).normalize(), 30)
+  sky.update(paused ? 0 : delta, camera, heightAt(camera.position.x, camera.position.z), shadowFocus)
   const far = Math.min(4000, sky.state.visibleFar)
   if (Math.abs(camera.far - far) > 1) {
     camera.far = far

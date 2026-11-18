@@ -1,0 +1,13 @@
+County Road texture credits
+
+All textures are from Poly Haven (https://polyhaven.com), released under
+CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/). They are
+resized and converted to WebP here.
+
+asphalt-cracked   Asphalt 02           https://polyhaven.com/a/asphalt_02
+asphalt-worn      Asphalt 04           https://polyhaven.com/a/asphalt_04
+grass             Sparse Grass         https://polyhaven.com/a/sparse_grass
+grass-patchy      Grass Ground         https://polyhaven.com/a/grass_ground
+verge-gravel      Brown Mud Rocks 01   https://polyhaven.com/a/brown_mud_rocks_01
+mud               Brown Mud 02         https://polyhaven.com/a/brown_mud_02
+paving            Concrete Pavement    https://polyhaven.com/a/concrete_pavement
