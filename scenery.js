@@ -284,5 +284,37 @@ export function buildCar(scene) {
       wheels.push({ pivot, spin, front: z > 0 })
     }
   }
-  return { root, body, wheels, brakeMaterial }
+  // Headlights: a spotlight from each lamp, aimed a little down the road
+  // ahead (a dipped beam), and a soft glow on the lamp itself. Always in
+  // the scene (switching lights in and out would recompile every
+  // material); off is no brightness.
+  const beams = []
+  const glowMap = lampGlow()
+  for (const side of [-1, 1]) {
+    const beam = new T.SpotLight(0xfff1d8, 0, 140, 0.4, 0.5, 1.25)
+    beam.position.set(side * 0.54, 0.5, 2.2)
+    beam.target.position.set(side * 1.2, 0, 38)
+    root.add(beam, beam.target)
+    const glow = new T.Sprite(new T.SpriteMaterial({
+      map: glowMap, color: 0xfff4e2, transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending, fog: false,
+    }))
+    glow.position.set(side * 0.54, 0.46, 2.22)
+    glow.scale.setScalar(1.1)
+    root.add(glow)
+    beams.push({ beam, glow })
+  }
+  return { root, body, wheels, brakeMaterial, lamps, beams }
+}
+
+function lampGlow() {
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = 64
+  const g = canvas.getContext('2d')
+  const gradient = g.createRadialGradient(32, 32, 0, 32, 32, 32)
+  gradient.addColorStop(0, 'rgba(255,255,255,1)')
+  gradient.addColorStop(0.18, 'rgba(255,248,230,0.75)')
+  gradient.addColorStop(1, 'rgba(255,240,210,0)')
+  g.fillStyle = gradient
+  g.fillRect(0, 0, 64, 64)
+  return new T.CanvasTexture(canvas)
 }

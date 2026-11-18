@@ -2,18 +2,20 @@ export const KEY_ACTIONS = {
   left: 'Steer left', right: 'Steer right', throttle: 'Throttle', brake: 'Brake',
   reverse: 'Toggle reverse', reset: 'Recover car',
   shiftDown: 'Shift down', shiftUp: 'Shift up', gearbox: 'Toggle manual gearbox',
+  headlights: 'Headlights on / off',
 }
 export const DEVICE_ACTIONS = {
   steer: 'Steering', throttle: 'Throttle', brake: 'Brake', lookX: 'Look left / right',
   lookY: 'Look up / down', reverse: 'Toggle reverse', reset: 'Recover car',
   shiftDown: 'Shift down', shiftUp: 'Shift up', gearbox: 'Toggle manual gearbox',
+  headlights: 'Headlights on / off',
 }
 export const centeredAction = action => action === 'steer' || action === 'lookX' || action === 'lookY'
-const PULSE_ACTIONS = ['reverse', 'reset', 'shiftDown', 'shiftUp', 'gearbox']
+const PULSE_ACTIONS = ['reverse', 'reset', 'shiftDown', 'shiftUp', 'gearbox', 'headlights']
 export const buttonAction = action => PULSE_ACTIONS.includes(action)
 const ZERO = {
   steer: 0, throttle: 0, brake: 0, lookX: 0, lookY: 0,
-  reverse: false, reset: false, shiftDown: false, shiftUp: false, gearbox: false,
+  reverse: false, reset: false, shiftDown: false, shiftUp: false, gearbox: false, headlights: false,
 }
 const STORAGE_KEY = 'county-road-controls-v1'
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
@@ -24,6 +26,7 @@ export function defaultKeys() {
     throttle: ['KeyW', 'ArrowUp'], brake: ['KeyS', 'ArrowDown'],
     reverse: ['KeyF', null], reset: ['KeyR', null],
     shiftDown: ['KeyQ', null], shiftUp: ['KeyE', null], gearbox: ['KeyM', null],
+    headlights: ['KeyL', null],
   }
 }
 
@@ -41,7 +44,7 @@ export function defaultDevice(device) {
     steer: newBinding('steer', 'axis', 0, true), throttle: newBinding('throttle', 'button', 7),
     brake: newBinding('brake', 'button', 6), lookX: newBinding('lookX', 'axis', 2, true),
     lookY: newBinding('lookY', 'axis', 3, true), reverse: newBinding('reverse', 'button', 0),
-    reset: newBinding('reset', 'button', 3),
+    reset: newBinding('reset', 'button', 3), headlights: newBinding('headlights', 'button', 2),
   }
 }
 

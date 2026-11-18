@@ -115,7 +115,7 @@ function setManualMode(manual) {
 
 function updateBindingHints() {
   const label = action => keyLabel(bindings.keys[action].find(Boolean))
-  select('keyboard-hint').textContent = `Keyboard · ${label('throttle')} throttle · ${label('brake')} brake · ${label('left')} / ${label('right')} steer · ${label('reverse')} reverse · ${label('reset')} recover · ${label('gearbox')} gearbox · ${label('shiftDown')} / ${label('shiftUp')} shift`
+  select('keyboard-hint').textContent = `Keyboard · ${label('throttle')} throttle · ${label('brake')} brake · ${label('left')} / ${label('right')} steer · ${label('reverse')} reverse · ${label('reset')} recover · ${label('gearbox')} gearbox · ${label('shiftDown')} / ${label('shiftUp')} shift · ${label('headlights')} lights`
 }
 
 function announce(message) {
@@ -145,7 +145,7 @@ function renderCar() {
   model.root.rotation.y = pose.heading
   model.body.rotation.x = -pose.ax * 0.0055
   model.body.rotation.z = -pose.ay * 0.006
-  model.brakeMaterial.emissiveIntensity = 0.55 + 2.4 * input.brake
+  model.brakeMaterial.emissiveIntensity = 0.55 + 0.45 * headlightLevel + 2.4 * input.brake
   for (const { pivot, spin, front } of model.wheels) {
     if (front) pivot.rotation.y = -pose.steer
     spin.rotation.x = pose.wheelAngle
@@ -235,6 +235,11 @@ renderer.setAnimationLoop(now => {
     }
   }
   if (input.shiftUp !== input.shiftDown) shiftGear(car, input.shiftUp ? 1 : -1)
+  if (input.headlights) {
+    // Switched by hand: the opposite of what they are now (until the next reload).
+    headlightsManual = !headlightsWanted()
+    announce(headlightsManual ? 'Headlights on' : 'Headlights off')
+  }
   const fraction = advance(delta)
   drivingAudio.update(now, car, input, false)
   interpolateCarPose(previousCar, car, fraction, pose)
@@ -265,6 +270,30 @@ function applySky() {
   world.setSeason(season)
 }
 
+// Headlights: on by themselves at dusk, at night and in mist or low cloud,
+// unless switched by hand (null = automatic).
+let headlightsManual = null
+let headlightLevel = 0
+function headlightsWanted() {
+  if (headlightsManual !== null) return headlightsManual
+  const s = sky.state
+  return s.sunElevation < 3 || s.fogNow > 0.2 || s.weather.mist > 0.3 || (s.lowCloudCover ?? 0) > 0.5
+}
+
+function updateHeadlights(delta) {
+  // They come up in a moment rather than instantly, like real bulbs.
+  headlightLevel += (Number(headlightsWanted()) - headlightLevel) * (1 - Math.exp(-delta * 14))
+  const on = headlightLevel
+  // The lamps' glow shows only from in front of the car.
+  const facing = Math.sin(pose.heading) * (camera.position.x - pose.x) + Math.cos(pose.heading) * (camera.position.z - pose.z)
+  const fromFront = Math.min(1, Math.max(0, (facing - 1.5) / 3))
+  for (const { beam, glow } of model.beams) {
+    beam.intensity = 650 * on
+    glow.material.opacity = 0.9 * on * fromFront
+  }
+  model.lamps.emissiveIntensity = 0.6 + 3.4 * on
+}
+
 function updateSky(delta, paused) {
   // Following the clock: move the sun along every half minute.
   if (skySettings.useClock && (clockTimer -= delta) <= 0) {
@@ -278,6 +307,7 @@ function updateSky(delta, paused) {
     camera.updateProjectionMatrix()
   }
   glare.update(camera, sky.state, delta, skySettings.sunGlare)
+  updateHeadlights(delta)
   renderer.toneMappingExposure = sky.state.exposure
 }
 

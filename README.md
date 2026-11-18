@@ -23,6 +23,9 @@ Open the local URL printed by Vite in a WebGL 2 browser. Connect a standard Xbox
 | Look around | Right stick | |
 | Toggle drive or reverse while stopped | A / Cross | F |
 | Recover to the nearest road | Y / Triangle | R |
+| Headlights on or off | X / Square | L |
+
+The headlights come on by themselves at dusk, at night, and in mist or low cloud. Switching them by hand overrides that until you reload.
 
 Open **Settings** or press **Esc** to change keyboard bindings and configure connected controllers or wheels. Pick a device, then select an axis or button directly or click **Detect** and move the control. Use the calibration buttons at each named position to set the range for a steering wheel, stick, or pedal. The reading shows the raw input followed by the calibrated input. Bindings are saved in this browser by device. Wheels and pedals need to be exposed by the browser as game controllers.
 
