@@ -1,9 +1,10 @@
 import * as T from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
-import { HALF_WORLD, JOINTS, LANDMARKS, PAD, ROAD_HALF, roads } from './roads.js'
+import { HALF_WORLD, JOINTS, LANDMARKS, PAD, roads } from './roads.js'
+import { asphaltMaterial, buildMarkerPosts, buildVillageEdges, roadStrip, vergeMaterial } from './roadSurface.js'
 import { addCloudShadows } from './sky.js'
 import { buildTerrain } from './landscape.js'
-import { PAD_HEIGHT, WOODS, heightAt } from './terrain.js'
+import { HEDGES, PAD_HEIGHT, WOODS, heightAt } from './terrain.js'
 
 const matte = color => addCloudShadows(new T.MeshStandardMaterial({ color, roughness: 0.83 }))
 const terrainMaterial = color => addCloudShadows(new T.MeshLambertMaterial({ color }))
@@ -11,24 +12,6 @@ let seed = 7392
 function random() {
   seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
   return seed / 4294967296
-}
-
-function texture(rgb, variance) {
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = 256
-  const context = canvas.getContext('2d')
-  const pixels = context.createImageData(256, 256)
-  for (let i = 0; i < pixels.data.length; i += 4) {
-    const value = (random() - 0.5) * variance
-    rgb.forEach((channel, offset) => { pixels.data[i + offset] = channel + value })
-    pixels.data[i + 3] = 255
-  }
-  context.putImageData(pixels, 0, 0)
-  const map = new T.CanvasTexture(canvas)
-  map.colorSpace = T.SRGBColorSpace
-  map.wrapS = map.wrapT = T.RepeatWrapping
-  map.anisotropy = 4
-  return map
 }
 
 const shadowGeometry = new T.PlaneGeometry().rotateX(-Math.PI / 2)
@@ -62,39 +45,10 @@ function box(parent, material, sx, sy, sz, x, y, z) {
   return mesh
 }
 
-function groundGeometry(positions, indices) {
-  const geometry = new T.BufferGeometry()
-  geometry.setAttribute('position', new T.Float32BufferAttribute(positions, 3))
-  const uv = []
-  for (let i = 0; i < positions.length; i += 3) uv.push(positions[i] / 12, positions[i + 2] / 12)
-  geometry.setAttribute('uv', new T.Float32BufferAttribute(uv, 2))
-  geometry.setIndex(indices)
-  geometry.computeVertexNormals()
-  return geometry
-}
-
 // Road surfaces: lifted a few centimetres above the ground they're built
 // on, and drawn in front of it (polygon offset), so it never shows through.
 const lifted = (material, units) => Object.assign(material, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: units })
 
-function ribbon(points, half, height) {
-  const positions = []
-  const indices = []
-  points.forEach((p, i) => {
-    const tangent = points[Math.min(i + 1, points.length - 1)].clone()
-      .sub(points[Math.max(0, i - 1)]).normalize()
-    const nx = tangent.z * half
-    const nz = -tangent.x * half
-    positions.push(p.x - nx, p.y + height, p.z - nz, p.x + nx, p.y + height, p.z + nz)
-    if (i > 0) {
-      const a = i * 2 - 2
-      indices.push(a, a + 2, a + 1, a + 2, a + 3, a + 1)
-    }
-  })
-  return groundGeometry(positions, indices)
-}
-
-/** A disc of road surface lying on the ground (level = a fixed height instead). */
 function disk(radius, x, z, material, lift, level) {
   const mesh = new T.Mesh(new T.CircleGeometry(radius, 96, 0, Math.PI * 2), material)
   mesh.geometry.rotateX(-Math.PI / 2)
@@ -105,40 +59,34 @@ function disk(radius, x, z, material, lift, level) {
     p.setY(i, (level ?? heightAt(p.getX(i) + x, p.getZ(i) + z)) + lift)
   }
   mesh.geometry.computeVertexNormals()
+  const count = p.count
+  mesh.geometry.setAttribute('aRoad', new T.Float32BufferAttribute(Array.from({ length: count }, (_, i) => [p.getX(i), p.getZ(i) + z]).flat(), 2))
+  mesh.geometry.setAttribute('aInfo', new T.Float32BufferAttribute(Array.from({ length: count }, () => [radius + 50, 0]).flat(), 2))
   mesh.position.set(x, 0, z)
   return mesh
 }
 
 export function buildWorld(scene) {
   buildTerrain(scene)
-  const asphalt = lifted(addCloudShadows(new T.MeshLambertMaterial({ map: texture([54, 58, 57], 18) })), -4)
-  const shoulder = lifted(terrainMaterial(0x9c9675), -2)
-  const joints = JOINTS
+  // The roads: worn asphalt over a muddy, gravelly margin that fades into
+  // the verge (roadSurface.js), kerbs and footways through the village,
+  // marker posts along the lanes.
+  const asphalt = asphaltMaterial()
+  const verge = vergeMaterial()
   const paint = lifted(new T.MeshBasicMaterial({ color: 0xe0dac1 }), -6)
-  const dashGeometry = new T.PlaneGeometry(0.13, 3.1).rotateX(-Math.PI / 2)
-  const dashTransforms = []
   const transforms = new T.Object3D()
   for (const points of roads) {
-    for (const [width, height, material] of [[5.42, 0.05, shoulder], [ROAD_HALF, 0.08, asphalt]]) {
-      const mesh = new T.Mesh(ribbon(points, width, height), material)
-      scene.add(mesh)
-    }
-    if (points === roads.at(-1)) continue
-    for (let i = 2; i < points.length - 1; i += 3) {
-      const p = points[i]
-      if (joints.some(([x, z]) => Math.hypot(p.x - x, p.z - z) < 10)) continue
-      const next = points[i + 1]
-      // Along the road, tipped to its grade.
-      transforms.rotation.set(-Math.atan2(next.y - p.y, Math.hypot(next.x - p.x, next.z - p.z)), Math.atan2(next.x - p.x, next.z - p.z), 0, 'YXZ')
-      transforms.position.set(p.x, p.y + 0.1, p.z)
-      transforms.updateMatrix()
-      dashTransforms.push(transforms.matrix.clone())
-    }
+    scene.add(new T.Mesh(roadStrip(points, p => [-(p.half + 2.2), p.half + 2.2], p => p.y + 0.04), verge))
+    scene.add(new T.Mesh(roadStrip(points, p => [-p.half, p.half], p => p.y + 0.08), asphalt))
   }
-  const markings = new T.InstancedMesh(dashGeometry, paint, dashTransforms.length)
-  dashTransforms.forEach((matrix, i) => markings.setMatrixAt(i, matrix))
-  scene.add(markings)
-  for (const [x, z] of joints) scene.add(disk(ROAD_HALF, x, z, asphalt, 0.085))
+  buildVillageEdges(scene, roads, p => p.y)
+  buildMarkerPosts(scene, roads, heightAt)
+  // Junctions: a disc of asphalt where the roads meet, as wide as the widest mouth.
+  for (const [x, z] of JOINTS) {
+    let half = 3
+    for (const points of roads) for (const p of points) if (Math.hypot(p.x - x, p.z - z) < 2) half = Math.max(half, p.half)
+    scene.add(disk(half, x, z, asphalt, 0.085))
+  }
   scene.add(disk(PAD.radius, PAD.x, PAD.z, asphalt, 0.085, PAD_HEIGHT))
   for (const radius of [10, 18]) {
     const ring = new T.Mesh(new T.RingGeometry(radius - 0.05, radius + 0.05, 80), paint)
@@ -223,6 +171,24 @@ export function buildWorld(scene) {
       transforms.position.set(tree.x, tree.y + tree.scale * 0.62, tree.z)
       transforms.scale.set(tree.scale * 0.86, tree.scale * 1.38, tree.scale * 0.82)
       transforms.rotation.set(0, (tree.x * 7.13 + tree.z) % Math.PI, 0)
+      transforms.updateMatrix()
+      mesh.setMatrixAt(index, transforms.matrix)
+    })
+    mesh.computeBoundingSphere()
+    scene.add(mesh)
+  }
+  // Hedgerows along the lanes (terrain.js; solid): hawthorn and blackthorn, dark and dense.
+  {
+    const material = terrainMaterial(0x41592f)
+    material.userData.summer = new T.Color(0x41592f)
+    material.userData.autumn = new T.Color(0x7d5a2c)
+    treeMaterials.push(material)
+    const mesh = new T.InstancedMesh(treeGeometries[1], material, HEDGES.length)
+    HEDGES.forEach((bush, index) => {
+      const lean = (bush.x * 3.7 + bush.z * 1.3) % 1
+      transforms.position.set(bush.x, bush.y + 0.7 * bush.scale, bush.z)
+      transforms.scale.set(1.3 * bush.scale, (0.95 + 0.3 * lean) * bush.scale, 1.3 * bush.scale)
+      transforms.rotation.set(0, lean * Math.PI, 0)
       transforms.updateMatrix()
       mesh.setMatrixAt(index, transforms.matrix)
     })

@@ -9,7 +9,7 @@ import { createSkySettings, loadSkySettings } from './skySettings.js'
 import { clockHours, dayOfYear, moonAge, seasonFor, weatherFor } from './weather.js'
 import { setGroundSeason } from './landscape.js'
 import { createGlare } from './glare.js'
-import { POND, WOODS, heightAt, inPond, resolveTrees, slopeAt } from './terrain.js'
+import { HEDGES, POND, WOODS, heightAt, inPond, resolveTrees, slopeAt } from './terrain.js'
 
 const select = id => document.getElementById(id)
 const notice = select('notice')
@@ -90,6 +90,8 @@ const mapZ = z => map.height / 2 + z * mapScale
   base.putImageData(relief, 0, 0)
   base.fillStyle = '#25331f'
   for (const tree of WOODS) base.fillRect(mapX(tree.x) - 1, mapZ(tree.z) - 1, 2, 2)
+  base.fillStyle = '#2c3b24'
+  for (const bush of HEDGES) base.fillRect(mapX(bush.x) - 0.5, mapZ(bush.z) - 0.5, 1.2, 1.2)
 }
 base.lineWidth = 3.3
 base.lineJoin = 'round'

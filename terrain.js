@@ -14,7 +14,7 @@ import { HALF_WORLD, JOINTS, LANDMARKS, PAD, roads } from './roads.js'
 
 export const FLAT_EDGE = HALF_WORLD + 50 // (where the distant country takes over)
 export const MAX_GRADE = 0.11
-const ROAD_FLAT = 8 // half-width of the level road bed (m)
+const BED = 3 // the level road bed reaches this far past the road's edge (m)
 export const GRID = 2.5 // ground grid cell (m)
 export const GRID_HALF = 720 // the grid covers -720..720 in x and z
 const N = Math.round((GRID_HALF * 2) / GRID) + 1
@@ -85,6 +85,10 @@ export function natural(x, z) {
 }
 
 export const POND = { x: -235, z: -185, radius: 85, level: 0 }
+
+/** The village stretch round the crossroads: kerbs and footways, no hedges. */
+export const VILLAGE = { x: 0, z: 28, radius: 115 }
+export const inVillage = (x, z) => Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < VILLAGE.radius
 
 // --- A smoothed ground, for the roads to follow --------------------------------
 
@@ -209,7 +213,7 @@ const ground = new Float32Array(N * N)
       const length2 = dx * dx + dz * dz
       mark(Math.min(a.x, b.x), Math.max(a.x, b.x), Math.min(a.z, b.z), Math.max(a.z, b.z), (index, x, z) => {
         const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / length2))
-        const d = Math.hypot(x - a.x - t * dx, z - a.z - t * dz) - ROAD_FLAT
+        const d = Math.hypot(x - a.x - t * dx, z - a.z - t * dz) - (a.half + (b.half - a.half) * t + BED)
         if (d < distance[index]) {
           distance[index] = d
           bed[index] = a.y + (b.y - a.y) * t
@@ -285,7 +289,7 @@ export const WOODS = []
     if (Math.hypot(x - POND.x, z - POND.z) < POND.radius + 6) continue
     if (Math.hypot(x - PAD.x, z - PAD.z) < PAD.radius + 14) continue
     if (LANDMARKS.some(l => Math.abs(x - l.x) < l.halfX + 12 && Math.abs(z - l.z) < l.halfZ + 12)) continue
-    if (roadDistance(x, z) < 15) continue
+    if (roadDistance(x, z) < 15 || inVillage(x, z)) continue
     const scale = 2.8 + random() * 5.5
     const tree = { x, z, y: heightAt(x, z), scale, radius: scale * 0.42, kind: random() < 0.6 ? 0 : 1 }
     WOODS.push(tree)
@@ -295,10 +299,61 @@ export const WOODS = []
   }
 }
 
+// --- Hedgerows ----------------------------------------------------------------------
+// Along stretches of the lanes, a couple of metres back from the edge, with
+// gaps for field gates; none near junctions, the skidpad or the village
+// stretch with kerbs. Each bush is solid.
+
+
+export const HEDGES = []
+{
+  let seed = 4421
+  const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296)
+  roads.forEach((road, index) => {
+    if (index === 4) return
+    for (const side of [-1, 1]) {
+      let gap = 0
+      for (let k = 1; k < road.length - 1; k++) {
+        const p = road[k]
+        // Stretches of hedge, different on each side.
+        if (fbm(p.along / 160 + index * 9.1 + side * 4.7, side * 2.3 + index) < 0.47) continue
+        if (JOINTS.some(([x, z]) => Math.hypot(p.x - x, p.z - z) < 30) || inVillage(p.x, p.z)) continue
+        // Field gates: a few metres open now and then.
+        if (gap > 0) {
+          gap -= 3
+          continue
+        }
+        if (random() < 0.012) {
+          gap = 6
+          continue
+        }
+        const q = road[k + 1]
+        const tx = q.x - p.x
+        const tz = q.z - p.z
+        const length = Math.hypot(tx, tz)
+        for (const f of [0, 0.5]) {
+          const offset = p.half + 2.4 + random() * 0.5
+          const x = p.x + tx * f + (tz / length) * offset * side
+          const z = p.z + tz * f - (tx / length) * offset * side
+          if (roadDistance(x, z) < p.half + 1.5) continue
+          if (Math.hypot(x - POND.x, z - POND.z) < POND.radius) continue
+          if (Math.hypot(x - PAD.x, z - PAD.z) < PAD.radius + 6) continue
+          if (LANDMARKS.some(l => Math.abs(x - l.x) < l.halfX + 4 && Math.abs(z - l.z) < l.halfZ + 4)) continue
+          const bush = { x, z, y: heightAt(x, z), scale: 1.05 + random() * 0.35, radius: 0.85, kind: 2 }
+          HEDGES.push(bush)
+          const key = `${Math.floor(x / WOOD_CELL)},${Math.floor(z / WOOD_CELL)}`
+          if (!woodGrid.has(key)) woodGrid.set(key, [])
+          woodGrid.get(key).push(bush)
+        }
+      }
+    }
+  })
+}
+
 function roadDistance(x, z) {
   let best = Infinity
   for (const road of roads) {
-    for (let k = 1; k < road.length; k += 2) {
+    for (let k = 0; k < road.length; k++) {
       const p = road[k]
       if (Math.abs(p.x - x) > 40 || Math.abs(p.z - z) > 40) continue
       best = Math.min(best, Math.hypot(p.x - x, p.z - z))
