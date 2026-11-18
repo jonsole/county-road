@@ -1,67 +1,14 @@
-// Rolling countryside around the drivable area, ported from RC Flight Sim
-// (src/sim/terrain.js, src/world/ground.js, the terrain in world.js).
-// The drivable square stays flat at y = 0 (the car's physics assume it);
-// beyond it gentle hills rise towards the horizon, covered in a patchwork of
-// farm fields with hedgerows, all drawn per pixel by the ground shader.
+// Drawing the land (its shape: terrain.js). The ground shader is ported
+// from RC Flight Sim (src/world/ground.js): grass at two scales, close-up
+// blades, and beyond the drivable area a patchwork of farm fields with
+// hedgerows. Steep banks and cuttings show bare earth.
 import * as T from 'three'
-import { HALF_WORLD } from './roads.js'
 import { addCloudShadows } from './sky.js'
+import { FLAT_EDGE, POND, groundGrid, natural } from './terrain.js'
 
-// Flat out to here (m from the centre, square), hills fully grown over BLEND.
-export const FLAT_EDGE = HALF_WORLD + 50
-const BLEND = 320
+export { FLAT_EDGE, heightAt } from './terrain.js'
 export const TERRAIN_SIZE = 7200
-const TERRAIN_SEGMENTS = 360
-
-function hash(x, z) {
-  const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453
-  return s - Math.floor(s)
-}
-
-function smoothNoise(x, z) {
-  const xi = Math.floor(x)
-  const zi = Math.floor(z)
-  const xf = x - xi
-  const zf = z - zi
-  const u = xf * xf * (3 - 2 * xf)
-  const v = zf * zf * (3 - 2 * zf)
-  const a = hash(xi, zi)
-  const b = hash(xi + 1, zi)
-  const c = hash(xi, zi + 1)
-  const d = hash(xi + 1, zi + 1)
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v
-}
-
-function fbm(x, z) {
-  let sum = 0
-  let amp = 1
-  let freq = 1
-  for (let i = 0; i < 4; i++) {
-    sum += amp * smoothNoise(x * freq, z * freq)
-    amp *= 0.5
-    freq *= 2.03
-  }
-  return sum / 1.875
-}
-
-/** Distance outside the flat square, with rounded corners. */
-function outside(x, z) {
-  const dx = Math.max(0, Math.abs(x) - FLAT_EDGE)
-  const dz = Math.max(0, Math.abs(z) - FLAT_EDGE)
-  return Math.hypot(dx, dz)
-}
-
-/** Ground height (m) at a point. 0 everywhere the car can drive. */
-export function heightAt(x, z) {
-  const r = outside(x, z)
-  if (r <= 0) return 0
-  const t = Math.min(1, r / BLEND)
-  const blend = t * t * (3 - 2 * t)
-  // Hills that never dip below the fields at their foot.
-  const hills = Math.max(0, fbm(x / 220, z / 220) * 55 - 14) + fbm(x / 60, z / 60) * 6
-  const far = Math.max(0, (r - 500) / 1400) * 140 * fbm(x / 600 + 7, z / 600 + 3)
-  return blend * hills + far
-}
+const OUTER_CELL = 20
 
 function grassTexture() {
   // 6 m of lawn: an even mid green with fine, low-contrast blade strokes,
@@ -159,6 +106,7 @@ export function setGroundSeason(season) {
 
 const GLSL = /* glsl */ `
 varying vec3 vGroundWorld;
+varying vec3 vGroundNormal;
 float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float gNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
@@ -181,8 +129,8 @@ function addGroundDetail(material) {
     shader.uniforms.grassFineMean = { value: fine.mean }
     Object.assign(shader.uniforms, groundUniforms)
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vGroundWorld;')
-      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGroundWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vGroundWorld;\nvarying vec3 vGroundNormal;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGroundWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvGroundNormal = normalize(mat3(modelMatrix) * objectNormal);')
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${GLSL}\nuniform sampler2D grassFine;\nuniform float grassFineMean;\nuniform vec3 uGrassTint;\nuniform float uGrassDry;\nuniform float uGrassLen;`)
       .replace('#include <map_fragment>', /* glsl */ `
@@ -192,7 +140,7 @@ function addGroundDetail(material) {
         vec2 q = p / 6.0;
         vec2 uvB = vec2(q.x * 0.81 - q.y * 0.59, q.x * 0.59 + q.y * 0.81) * 0.43 + 0.37;
         float mixAB = smoothstep(0.3, 0.7, gNoise(p / 37.0));
-        vec3 g = mix(texture2D(map, vMapUv).rgb, texture2D(map, uvB).rgb, mixAB);
+        vec3 g = mix(texture2D(map, q).rgb, texture2D(map, uvB).rgb, mixAB);
         // Large, soft patches of lighter and darker grass.
         g *= 0.94 + 0.12 * gFbm(p / 31.0);
 
@@ -222,6 +170,20 @@ function addGroundDetail(material) {
           vec3 hedgeCol = vec3(0.12, 0.2, 0.08) * (0.7 + 0.6 * gNoise(fp / 2.0));
           field = mix(field, hedgeCol, hedge);
           g = mix(g, field, farm);
+        }
+
+        // Steep banks, cuttings and hillsides: thin grass over bare earth
+        // and stones on the steepest.
+        float upright = normalize(vGroundNormal).y;
+        float steep = smoothstep(0.86, 0.66, upright);
+        if (steep > 0.0) {
+          float clods = gNoise(p / 1.3) * 0.6 + gNoise(p / 4.0) * 0.4;
+          vec3 earth = vec3(0.43, 0.35, 0.26) * (0.75 + 0.45 * clods);
+          vec3 stone = vec3(0.52, 0.5, 0.46) * (0.8 + 0.35 * gHash(floor(p * 2.0)));
+          earth = mix(earth, stone, smoothstep(0.62, 0.5, upright) * step(0.55, gNoise(p / 2.2 + 3.0)));
+          // Grass hangs on in patches.
+          float hold = smoothstep(0.35, 0.65, gNoise(p / 3.1 + 7.0) + (upright - 0.7));
+          g = mix(g, earth, steep * (1.0 - 0.7 * hold));
         }
 
         // Close up: blades at two scales and angles, fading with distance.
@@ -259,33 +221,96 @@ function addGroundDetail(material) {
   return material
 }
 
-/** The terrain mesh: one big grid following heightAt, with the ground shader. */
+/** The ground: a fine mesh over the drivable area (from terrain.js's grid) and a coarse one beyond. */
 export function buildTerrain(scene) {
-  const geometry = new T.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGMENTS, TERRAIN_SEGMENTS)
-  geometry.rotateX(-Math.PI / 2)
-  const position = geometry.attributes.position
-  const colors = []
+  const map = grassTexture()
+  const material = addCloudShadows(addGroundDetail(new T.MeshLambertMaterial({ map, vertexColors: true })))
+  const tint = groundTint()
+
+  // Inside: the grid the physics uses, so they agree, with a skirt round
+  // its edge dropping under the coarse ground (no cracks where they meet).
+  const { heights, n, cell, half } = groundGrid
+  const m = n + 2
+  const inner = new Float32Array(m * m * 3)
+  const innerColour = new Float32Array(m * m * 3)
+  for (let j = 0; j < m; j++) {
+    for (let i = 0; i < m; i++) {
+      const gi = Math.min(n - 1, Math.max(0, i - 1))
+      const gj = Math.min(n - 1, Math.max(0, j - 1))
+      const x = gi * cell - half
+      const z = gj * cell - half
+      const skirt = i === 0 || j === 0 || i === m - 1 || j === m - 1
+      const h = heights[gj * n + gi] - (skirt ? 4 : 0)
+      const k = (j * m + i) * 3
+      inner.set([x, h, z], k)
+      tint(x, z, h, innerColour, k)
+    }
+  }
+  scene.add(gridMesh(inner, innerColour, m, () => true, material))
+
+  // Outside: every 20 m out to the horizon, leaving a hole for the inside.
+  const cells = TERRAIN_SIZE / OUTER_CELL
+  const o = cells + 1
+  const outer = new Float32Array(o * o * 3)
+  const outerColour = new Float32Array(o * o * 3)
+  for (let j = 0; j < o; j++) {
+    for (let i = 0; i < o; i++) {
+      const x = i * OUTER_CELL - TERRAIN_SIZE / 2
+      const z = j * OUTER_CELL - TERRAIN_SIZE / 2
+      const h = natural(x, z)
+      const k = (j * o + i) * 3
+      outer.set([x, h, z], k)
+      tint(x, z, h, outerColour, k)
+    }
+  }
+  const covered = (i, j) => {
+    const x0 = i * OUTER_CELL - TERRAIN_SIZE / 2
+    const z0 = j * OUTER_CELL - TERRAIN_SIZE / 2
+    return x0 >= -half && x0 + OUTER_CELL <= half && z0 >= -half && z0 + OUTER_CELL <= half
+  }
+  scene.add(gridMesh(outer, outerColour, o, (i, j) => !covered(i, j), material))
+
+  // The pond.
+  const water = new T.Mesh(new T.CircleGeometry(POND.radius, 64).rotateX(-Math.PI / 2), addCloudShadows(new T.MeshStandardMaterial({
+    color: 0x2c4a4c, roughness: 0.12, metalness: 0.25, transparent: true, opacity: 0.92,
+  })))
+  water.position.set(POND.x, POND.level, POND.z)
+  scene.add(water)
+}
+
+function groundTint() {
   // Vertex colours multiply the grass texture, so they stay light.
   const c1 = new T.Color('#f2ffd8')
   const c2 = new T.Color('#c4d79c')
   const c3 = new T.Color('#e8e2c0')
-  const tint = new T.Color()
-  for (let i = 0; i < position.count; i++) {
-    const x = position.getX(i)
-    const z = position.getZ(i)
-    const h = heightAt(x, z)
-    position.setY(i, h)
-    const n = Math.sin(x * 0.011) * Math.cos(z * 0.013) * 0.5 + 0.5
-    tint.copy(c1).lerp(c2, n * 0.8)
-    if (h > 40) tint.lerp(c3, Math.min(1, (h - 40) / 120))
-    colors.push(tint.r, tint.g, tint.b)
+  const colour = new T.Color()
+  return (x, z, h, out, k) => {
+    const wave = Math.sin(x * 0.011) * Math.cos(z * 0.013) * 0.5 + 0.5
+    colour.copy(c1).lerp(c2, wave * 0.8)
+    if (h > 60) colour.lerp(c3, Math.min(1, (h - 60) / 120))
+    out[k] = colour.r
+    out[k + 1] = colour.g
+    out[k + 2] = colour.b
   }
-  geometry.setAttribute('color', new T.Float32BufferAttribute(colors, 3))
+}
+
+function gridMesh(positions, colours, n, keep, material) {
+  const index = []
+  for (let j = 0; j < n - 1; j++) {
+    for (let i = 0; i < n - 1; i++) {
+      if (!keep(i, j)) continue
+      const a = j * n + i
+      const b = a + 1
+      const c = a + n
+      const d = c + 1
+      index.push(a, c, b, b, c, d)
+    }
+  }
+  const geometry = new T.BufferGeometry()
+  geometry.setAttribute('position', new T.BufferAttribute(positions, 3))
+  geometry.setAttribute('color', new T.BufferAttribute(colours, 3))
+  geometry.setIndex(index.length > 65535 ? new T.Uint32BufferAttribute(index, 1) : new T.Uint16BufferAttribute(index, 1))
   geometry.computeVertexNormals()
-  const map = grassTexture()
-  map.repeat.set(TERRAIN_SIZE / 6, TERRAIN_SIZE / 6)
-  const material = addCloudShadows(addGroundDetail(new T.MeshLambertMaterial({ map, vertexColors: true })))
-  const ground = new T.Mesh(geometry, material)
-  scene.add(ground)
-  return ground
+  geometry.computeBoundingSphere()
+  return new T.Mesh(geometry, material)
 }

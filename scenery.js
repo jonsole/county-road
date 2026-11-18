@@ -1,8 +1,9 @@
 import * as T from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
-import { HALF_WORLD, LANDMARKS, PAD, ROAD_HALF, roads } from './roads.js'
+import { HALF_WORLD, JOINTS, LANDMARKS, PAD, ROAD_HALF, roads } from './roads.js'
 import { addCloudShadows } from './sky.js'
-import { buildTerrain, heightAt } from './landscape.js'
+import { buildTerrain } from './landscape.js'
+import { PAD_HEIGHT, WOODS, heightAt } from './terrain.js'
 
 const matte = color => addCloudShadows(new T.MeshStandardMaterial({ color, roughness: 0.83 }))
 const terrainMaterial = color => addCloudShadows(new T.MeshLambertMaterial({ color }))
@@ -72,6 +73,10 @@ function groundGeometry(positions, indices) {
   return geometry
 }
 
+// Road surfaces: lifted a few centimetres above the ground they're built
+// on, and drawn in front of it (polygon offset), so it never shows through.
+const lifted = (material, units) => Object.assign(material, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: units })
+
 function ribbon(points, half, height) {
   const positions = []
   const indices = []
@@ -80,7 +85,7 @@ function ribbon(points, half, height) {
       .sub(points[Math.max(0, i - 1)]).normalize()
     const nx = tangent.z * half
     const nz = -tangent.x * half
-    positions.push(p.x - nx, height, p.z - nz, p.x + nx, height, p.z + nz)
+    positions.push(p.x - nx, p.y + height, p.z - nz, p.x + nx, p.y + height, p.z + nz)
     if (i > 0) {
       const a = i * 2 - 2
       indices.push(a, a + 2, a + 1, a + 2, a + 3, a + 1)
@@ -89,27 +94,32 @@ function ribbon(points, half, height) {
   return groundGeometry(positions, indices)
 }
 
-function disk(radius, x, z, material, height) {
-  const mesh = new T.Mesh(new T.CircleGeometry(radius, 96), material)
+/** A disc of road surface lying on the ground (level = a fixed height instead). */
+function disk(radius, x, z, material, lift, level) {
+  const mesh = new T.Mesh(new T.CircleGeometry(radius, 96, 0, Math.PI * 2), material)
   mesh.geometry.rotateX(-Math.PI / 2)
   const p = mesh.geometry.attributes.position
   const uv = mesh.geometry.attributes.uv
-  for (let i = 0; i < p.count; i++) uv.setXY(i, (p.getX(i) + x) / 12, (p.getZ(i) + z) / 12)
-  mesh.position.set(x, height, z)
+  for (let i = 0; i < p.count; i++) {
+    uv.setXY(i, (p.getX(i) + x) / 12, (p.getZ(i) + z) / 12)
+    p.setY(i, (level ?? heightAt(p.getX(i) + x, p.getZ(i) + z)) + lift)
+  }
+  mesh.geometry.computeVertexNormals()
+  mesh.position.set(x, 0, z)
   return mesh
 }
 
 export function buildWorld(scene) {
   buildTerrain(scene)
-  const asphalt = addCloudShadows(new T.MeshLambertMaterial({ map: texture([54, 58, 57], 18) }))
-  const shoulder = terrainMaterial(0x9c9675)
-  const joints = [[0, -360], [0, 360], [-428, 0], [0, 28], [320, 0], [0, -238]]
-  const paint = new T.MeshBasicMaterial({ color: 0xe0dac1 })
+  const asphalt = lifted(addCloudShadows(new T.MeshLambertMaterial({ map: texture([54, 58, 57], 18) })), -4)
+  const shoulder = lifted(terrainMaterial(0x9c9675), -2)
+  const joints = JOINTS
+  const paint = lifted(new T.MeshBasicMaterial({ color: 0xe0dac1 }), -6)
   const dashGeometry = new T.PlaneGeometry(0.13, 3.1).rotateX(-Math.PI / 2)
   const dashTransforms = []
   const transforms = new T.Object3D()
   for (const points of roads) {
-    for (const [width, height, material] of [[5.42, 0.008, shoulder], [ROAD_HALF, 0.016, asphalt]]) {
+    for (const [width, height, material] of [[5.42, 0.05, shoulder], [ROAD_HALF, 0.08, asphalt]]) {
       const mesh = new T.Mesh(ribbon(points, width, height), material)
       scene.add(mesh)
     }
@@ -118,8 +128,9 @@ export function buildWorld(scene) {
       const p = points[i]
       if (joints.some(([x, z]) => Math.hypot(p.x - x, p.z - z) < 10)) continue
       const next = points[i + 1]
-      transforms.rotation.y = Math.atan2(next.x - p.x, next.z - p.z)
-      transforms.position.set(p.x, 0.026, p.z)
+      // Along the road, tipped to its grade.
+      transforms.rotation.set(-Math.atan2(next.y - p.y, Math.hypot(next.x - p.x, next.z - p.z)), Math.atan2(next.x - p.x, next.z - p.z), 0, 'YXZ')
+      transforms.position.set(p.x, p.y + 0.1, p.z)
       transforms.updateMatrix()
       dashTransforms.push(transforms.matrix.clone())
     }
@@ -127,17 +138,17 @@ export function buildWorld(scene) {
   const markings = new T.InstancedMesh(dashGeometry, paint, dashTransforms.length)
   dashTransforms.forEach((matrix, i) => markings.setMatrixAt(i, matrix))
   scene.add(markings)
-  for (const [x, z] of joints) scene.add(disk(ROAD_HALF, x, z, asphalt, 0.019))
-  scene.add(disk(PAD.radius, PAD.x, PAD.z, asphalt, 0.02))
+  for (const [x, z] of joints) scene.add(disk(ROAD_HALF, x, z, asphalt, 0.085))
+  scene.add(disk(PAD.radius, PAD.x, PAD.z, asphalt, 0.085, PAD_HEIGHT))
   for (const radius of [10, 18]) {
     const ring = new T.Mesh(new T.RingGeometry(radius - 0.05, radius + 0.05, 80), paint)
     ring.rotation.x = -Math.PI / 2
-    ring.position.set(PAD.x, 0.027, PAD.z)
+    ring.position.set(PAD.x, PAD_HEIGHT + 0.1, PAD.z)
     scene.add(ring)
   }
 
   const barn = new T.Group()
-  barn.position.set(LANDMARKS[0].x, 0, LANDMARKS[0].z)
+  barn.position.set(LANDMARKS[0].x, LANDMARKS[0].y, LANDMARKS[0].z)
   scene.add(barn)
   addContactShadow(barn, 25, 20, 0.4, 3, 2)
   box(barn, matte(0x8c4432), 16, 5, 12, 0, 2.5, 0)
@@ -149,7 +160,7 @@ export function buildWorld(scene) {
   }
 
   const tower = new T.Group()
-  tower.position.set(LANDMARKS[1].x, 0, LANDMARKS[1].z)
+  tower.position.set(LANDMARKS[1].x, LANDMARKS[1].y, LANDMARKS[1].z)
   scene.add(tower)
   addContactShadow(tower, 11, 10, 0.3, 3, 2)
   const steel = matte(0x777b70)
@@ -192,7 +203,7 @@ export function buildWorld(scene) {
       const scale = 2.8 + random() * 6
       transforms.position.set(x, heightAt(x, z) + scale * 0.68, z)
       transforms.scale.set(scale * 0.86, scale * 1.38, scale * 0.82)
-      transforms.rotation.y = random() * Math.PI
+      transforms.rotation.set(0, random() * Math.PI, 0)
       transforms.updateMatrix()
       batches[Number(distance < HALF_WORLD + 150)].push(transforms.matrix.clone())
     }
@@ -203,6 +214,20 @@ export function buildWorld(scene) {
       trees.computeBoundingSphere()
       scene.add(trees)
     })
+  }
+  // Woods and copses on the slopes inside the drivable area (terrain.js; solid).
+  for (const kind of [0, 1]) {
+    const trees = WOODS.filter(tree => tree.kind === kind)
+    const mesh = new T.InstancedMesh(treeGeometries[1], treeMaterials[kind], trees.length)
+    trees.forEach((tree, index) => {
+      transforms.position.set(tree.x, tree.y + tree.scale * 0.62, tree.z)
+      transforms.scale.set(tree.scale * 0.86, tree.scale * 1.38, tree.scale * 0.82)
+      transforms.rotation.set(0, (tree.x * 7.13 + tree.z) % Math.PI, 0)
+      transforms.updateMatrix()
+      mesh.setMatrixAt(index, transforms.matrix)
+    })
+    mesh.computeBoundingSphere()
+    scene.add(mesh)
   }
   const fresh = new T.Color(0x8fae58)
   const bareTwigs = new T.Color(0x6b6158)

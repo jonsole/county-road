@@ -38,7 +38,15 @@ export function shiftGear(car, direction) {
   car.shiftDelay = 0.18
 }
 
-export function stepCar(car, input, isPaved) {
+const FLAT = () => [0, 0]
+const gradient = [0, 0]
+
+/**
+ * One physics step. isPaved(x, z) gives each tyre's surface; slope(x, z, out)
+ * the ground's gradient [dh/dx, dh/dz] under the car (flat if left out):
+ * gravity pulls along it, and it shares out the weight on the tyres.
+ */
+export function stepCar(car, input, isPaved, slope = FLAT) {
   const { u, v, yaw } = car
   const speed = Math.hypot(u, v)
   const cos = Math.cos(car.heading)
@@ -84,8 +92,15 @@ export function stepCar(car, input, isPaved) {
   const frontLoad = MASS * GRAVITY * REAR / wheelbase
   const pitch = clamp(MASS * car.ax * 0.51 / wheelbase, -3500, 3500)
   const roll = clamp(MASS * car.ay * 0.51 / TRACK, -3400, 3400)
-  let forwardForce = -0.43 * u * Math.abs(u)
-  let rightForce = 0
+  // Gravity down the slope: the grade along the car and across it.
+  const [gx, gz] = slope(car.x, car.z, gradient)
+  const gradeForward = gx * sin + gz * cos
+  const gradeRight = -gx * cos + gz * sin
+  const tilt = 1 / Math.sqrt(1 + gradeForward ** 2 + gradeRight ** 2)
+  const gravityForward = -MASS * GRAVITY * gradeForward * tilt
+  const gravityRight = -MASS * GRAVITY * gradeRight * tilt
+  let forwardForce = -0.43 * u * Math.abs(u) + gravityForward
+  let rightForce = gravityRight
   let moment = 0
   let rearSlip = 0
   let pavedSlip = 0
@@ -97,8 +112,8 @@ export function stepCar(car, input, isPaved) {
     const wheelX = car.x - rightOffset * cos + forwardOffset * sin
     const wheelZ = car.z + rightOffset * sin + forwardOffset * cos
     const paved = isPaved(wheelX, wheelZ)
-    const load = Math.max(400, (front ? frontLoad - pitch : MASS * GRAVITY - frontLoad + pitch) / 2
-      - roll * side * (front ? 0.53 : 0.47))
+    const load = Math.max(400, ((front ? frontLoad - pitch : MASS * GRAVITY - frontLoad + pitch) / 2
+      - roll * side * (front ? 0.53 : 0.47)) * tilt)
     const c = front ? steerCos : 1
     const s = front ? steerSin : 0
     const wheelForward = u - yaw * rightOffset
@@ -119,14 +134,16 @@ export function stepCar(car, input, isPaved) {
     if (paved) pavedSlip = Math.max(pavedSlip, contactSlip)
   }
 
-  car.ax += (forwardForce / MASS - car.ax) * 0.08
-  car.ay += (rightForce / MASS - car.ay) * 0.08
+  // (What the body feels, for weight transfer and lean: not gravity's pull.)
+  car.ax += ((forwardForce - gravityForward) / MASS - car.ax) * 0.08
+  car.ay += ((rightForce - gravityRight) / MASS - car.ay) * 0.08
   car.slip = rearSlip
   car.pavedSlip = pavedSlip
   car.u += (forwardForce / MASS + yaw * v) * STEP
   car.v += (rightForce / MASS - yaw * u) * STEP
   car.yaw += moment / INERTIA * STEP
-  if (speed < 0.12 && input.throttle < 0.015) car.u = car.v = car.yaw = 0
+  // At a standstill the car holds (as if on the handbrake), unless the slope is too steep to hold.
+  if (speed < 0.12 && input.throttle < 0.015 && Math.hypot(gradeForward, gradeRight) < 0.45) car.u = car.v = car.yaw = 0
   car.wheelAngle += (u + car.u) * 0.5 * STEP / WHEEL_RADIUS
   car.heading -= car.yaw * STEP
   car.x += (Math.sin(car.heading) * car.u - Math.cos(car.heading) * car.v) * STEP

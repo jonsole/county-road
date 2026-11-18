@@ -4,7 +4,7 @@
 // it; cloud cover, mist and low cloud dim it.
 // A screen overlay behind the HUD: a white veil and a bright bloom.
 import { Vector3 } from 'three'
-import { heightAt } from './landscape.js'
+import { heightAt } from './terrain.js'
 import { cloudUniforms } from './sky.js'
 
 const smooth = (a, b, x) => {

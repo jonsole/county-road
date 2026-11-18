@@ -9,6 +9,7 @@ import { createSkySettings, loadSkySettings } from './skySettings.js'
 import { clockHours, dayOfYear, moonAge, seasonFor, weatherFor } from './weather.js'
 import { setGroundSeason } from './landscape.js'
 import { createGlare } from './glare.js'
+import { POND, WOODS, heightAt, inPond, resolveTrees, slopeAt } from './terrain.js'
 
 const select = id => document.getElementById(id)
 const notice = select('notice')
@@ -68,6 +69,28 @@ const base = staticMap.getContext('2d')
 const mapScale = 0.219
 const mapX = x => map.width / 2 + x * mapScale
 const mapZ = z => map.height / 2 + z * mapScale
+// Relief: the hills shaded as if lit from the north-west, the woods and the pond.
+{
+  const relief = base.createImageData(map.width, map.height)
+  const step = 1 / mapScale
+  for (let py = 0; py < map.height; py++) {
+    for (let px = 0; px < map.width; px++) {
+      const x = (px - map.width / 2) / mapScale
+      const z = (py - map.height / 2) / mapScale
+      const h = heightAt(x, z)
+      const dx = (heightAt(x + step, z) - heightAt(x - step, z)) / (2 * step)
+      const dz = (heightAt(x, z + step) - heightAt(x, z - step)) / (2 * step)
+      const light = Math.max(-0.6, Math.min(0.6, (dx + dz) * -0.9))
+      const k = (py * map.width + px) * 4
+      const water = Math.hypot(x - POND.x, z - POND.z) < POND.radius && h < POND.level
+      const shade = 34 + h * 0.35 + light * 40
+      relief.data.set(water ? [40, 70, 78, 255] : [shade * 0.82, shade, shade * 0.74, 255], k)
+    }
+  }
+  base.putImageData(relief, 0, 0)
+  base.fillStyle = '#25331f'
+  for (const tree of WOODS) base.fillRect(mapX(tree.x) - 1, mapZ(tree.z) - 1, 2, 2)
+}
 base.lineWidth = 3.3
 base.lineJoin = 'round'
 base.lineCap = 'round'
@@ -98,6 +121,8 @@ const previousCar = { ...car }
 const pose = {}
 let input = controls()
 let cameraYaw
+let cameraHeight
+let carGround = 0
 let noticeUntil = 0
 let lastControllerStatus
 let lastHudAt = -Infinity
@@ -130,19 +155,31 @@ function recover(message) {
   car.manual = manual
   Object.assign(previousCar, car)
   cameraYaw = undefined
+  cameraHeight = undefined
   announce(message)
 }
 
 const advance = createStepper(() => {
   Object.assign(previousCar, car)
-  stepCar(car, input, isPaved)
+  stepCar(car, input, isPaved, slopeAt)
   resolveLandmarks(car, previousCar.x, previousCar.z)
+  resolveTrees(car)
+  if (inPond(car.x, car.z)) recover('Into the pond · returned to the nearest road')
   if (Math.max(Math.abs(car.x), Math.abs(car.z)) > HALF_WORLD) recover('Map edge · returned to the nearest road')
 })
 
+// The car sits on the ground under its wheels: pitched and rolled with it.
 function renderCar() {
-  model.root.position.set(pose.x, 0.024, pose.z)
-  model.root.rotation.y = pose.heading
+  const sin = Math.sin(pose.heading)
+  const cos = Math.cos(pose.heading)
+  const at = (forward, right) => heightAt(pose.x + forward * sin - right * cos, pose.z + forward * cos + right * sin)
+  const front = (at(1.23, -0.8) + at(1.23, 0.8)) / 2
+  const rear = (at(-1.39, -0.8) + at(-1.39, 0.8)) / 2
+  const left = (at(1.23, -0.8) + at(-1.39, -0.8)) / 2
+  const right = (at(1.23, 0.8) + at(-1.39, 0.8)) / 2
+  carGround = (front * 1.39 + rear * 1.23) / 2.62
+  model.root.position.set(pose.x, carGround + 0.024, pose.z)
+  model.root.rotation.set(-Math.atan2(front - rear, 2.62), pose.heading, Math.atan2(left - right, 1.6), 'YXZ')
   model.body.rotation.x = -pose.ax * 0.0055
   model.body.rotation.z = -pose.ay * 0.006
   model.brakeMaterial.emissiveIntensity = 0.55 + 0.45 * headlightLevel + 2.4 * input.brake
@@ -160,8 +197,14 @@ function updateCamera(delta) {
   const sin = Math.sin(cameraYaw)
   const cos = Math.cos(cameraYaw)
   const distance = 7.2 + Math.min(1.8, Math.abs(pose.u) * 0.035)
-  camera.position.set(pose.x - sin * distance, 3.26 + input.lookY * 1.3, pose.z - cos * distance)
-  focus.set(pose.x + sin * 2.3, 0.88, pose.z + cos * 2.3)
+  // Following the car's height, eased, and never inside a hillside.
+  const x = pose.x - sin * distance
+  const z = pose.z - cos * distance
+  cameraHeight ??= carGround
+  cameraHeight += (carGround - cameraHeight) * (1 - Math.exp(-6 * delta))
+  const y = Math.max(cameraHeight + 3.26 + input.lookY * 1.3, heightAt(x, z) + 1.4)
+  camera.position.set(x, y, z)
+  focus.set(pose.x + sin * 2.3, cameraHeight + 0.88, pose.z + cos * 2.3)
   camera.lookAt(focus)
 }
 
@@ -300,7 +343,7 @@ function updateSky(delta, paused) {
     clockTimer = 30
     applySky()
   }
-  sky.update(paused ? 0 : delta, camera)
+  sky.update(paused ? 0 : delta, camera, heightAt(camera.position.x, camera.position.z))
   const far = Math.min(4000, sky.state.visibleFar)
   if (Math.abs(camera.far - far) > 1) {
     camera.far = far
