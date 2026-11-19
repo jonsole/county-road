@@ -1,18 +1,12 @@
 import * as T from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
-import { HALF_WORLD, JOINTS, LANDMARKS, PAD, roads } from './roads.js'
+import { JOINTS, LANDMARKS, PAD, roads } from './roads.js'
 import { asphaltMaterial, buildMarkerPosts, buildVillageEdges, roadStrip, vergeMaterial } from './roadSurface.js'
 import { addCloudShadows } from './sky.js'
 import { buildTerrain } from './landscape.js'
-import { HEDGES, PAD_HEIGHT, WOODS, heightAt } from './terrain.js'
+import { PAD_HEIGHT, heightAt } from './terrain.js'
 
 const matte = color => addCloudShadows(new T.MeshStandardMaterial({ color, roughness: 0.83 }))
-const terrainMaterial = color => addCloudShadows(new T.MeshLambertMaterial({ color }))
-let seed = 7392
-function random() {
-  seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
-  return seed / 4294967296
-}
 
 const shadowGeometry = new T.PlaneGeometry().rotateX(-Math.PI / 2)
 let shadowTexture
@@ -120,101 +114,14 @@ export function buildWorld(scene) {
   lid.position.y = 22.65
   tower.add(lid)
 
-  // Trees: scattered over the fields around the roads, thicker in the
-  // woods and copses on the hills beyond, all standing on the ground.
-  const copses = Array.from({ length: 140 }, () => [
-    (random() - 0.5) * 5600, (random() - 0.5) * 5600, 30 + random() * 110])
-  const treeGeometries = [new T.IcosahedronGeometry(1, 0), new T.IcosahedronGeometry(1, 1)]
-  // Each kind of tree turns its own autumn colour.
-  const treeMaterials = []
-  for (const [color, count, spread, autumnColor] of [[0x697f4b, 530, 2400, 0xb5762c], [0x506843, 300, 2400, 0x8c5a2e],
-    [0x5f7746, 1400, 5600, 0xc29038], [0x4a6140, 900, 5600, 0x9a4a24]]) {
-    const material = terrainMaterial(color)
-    material.userData.summer = new T.Color(color)
-    material.userData.autumn = new T.Color(autumnColor)
-    treeMaterials.push(material)
-    const batches = [[], []]
-    for (let i = 0; i < count; i++) {
-      let x = (random() - 0.5) * spread
-      let z = (random() - 0.5) * spread
-      if (spread > 2400) {
-        // On the hills, trees grow in copses and small woods.
-        const [cx, cz, size] = copses[Math.floor(random() * copses.length)]
-        x = cx + (random() + random() - 1) * size
-        z = cz + (random() + random() - 1) * size
-      }
-      const distance = Math.max(Math.abs(x), Math.abs(z))
-      if (distance < HALF_WORLD + 14 || (spread > 2400 && distance < 1100)) {
-        i--
-        continue
-      }
-      const scale = 2.8 + random() * 6
-      transforms.position.set(x, heightAt(x, z) + scale * 0.68, z)
-      transforms.scale.set(scale * 0.86, scale * 1.38, scale * 0.82)
-      transforms.rotation.set(0, random() * Math.PI, 0)
-      transforms.updateMatrix()
-      batches[Number(distance < HALF_WORLD + 150)].push(transforms.matrix.clone())
-    }
-    batches.forEach((matrices, i) => {
-      if (!matrices.length) return
-      const trees = new T.InstancedMesh(treeGeometries[i], material, matrices.length)
-      matrices.forEach((matrix, index) => trees.setMatrixAt(index, matrix))
-      trees.computeBoundingSphere()
-      scene.add(trees)
-    })
-  }
-  // Woods and copses on the slopes inside the drivable area (terrain.js; solid).
-  for (const kind of [0, 1]) {
-    const trees = WOODS.filter(tree => tree.kind === kind)
-    const mesh = new T.InstancedMesh(treeGeometries[1], treeMaterials[kind], trees.length)
-    trees.forEach((tree, index) => {
-      transforms.position.set(tree.x, tree.y + tree.scale * 0.62, tree.z)
-      transforms.scale.set(tree.scale * 0.86, tree.scale * 1.38, tree.scale * 0.82)
-      transforms.rotation.set(0, (tree.x * 7.13 + tree.z) % Math.PI, 0)
-      transforms.updateMatrix()
-      mesh.setMatrixAt(index, transforms.matrix)
-    })
-    mesh.computeBoundingSphere()
-    scene.add(mesh)
-  }
-  // Hedgerows along the lanes (terrain.js; solid): hawthorn and blackthorn, dark and dense.
-  {
-    const material = terrainMaterial(0x41592f)
-    material.userData.summer = new T.Color(0x41592f)
-    material.userData.autumn = new T.Color(0x7d5a2c)
-    treeMaterials.push(material)
-    const mesh = new T.InstancedMesh(treeGeometries[1], material, HEDGES.length)
-    HEDGES.forEach((bush, index) => {
-      const lean = (bush.x * 3.7 + bush.z * 1.3) % 1
-      transforms.position.set(bush.x, bush.y + 0.7 * bush.scale, bush.z)
-      transforms.scale.set(1.3 * bush.scale, (0.95 + 0.3 * lean) * bush.scale, 1.3 * bush.scale)
-      transforms.rotation.set(0, lean * Math.PI, 0)
-      transforms.updateMatrix()
-      mesh.setMatrixAt(index, transforms.matrix)
-    })
-    mesh.computeBoundingSphere()
-    scene.add(mesh)
-  }
-  // Shadows: everything on the ground receives them; trees, hedges,
-  // buildings and posts cast them (the distant trees, beyond the shadow
-  // map's reach, don't).
+  // Shadows: everything on the ground receives them; the buildings and
+  // posts cast them (the trees and hedges: forest.js).
   scene.traverse(object => {
     if (!object.isMesh) return
     object.receiveShadow = true
     const caster = object.isInstancedMesh || object.parent === barn || object.parent === tower
-    if (caster && (!object.isInstancedMesh || object.boundingSphere.radius < 3000)) object.castShadow = true
+    if (caster) object.castShadow = true
   })
-  const fresh = new T.Color(0x8fae58)
-  const bareTwigs = new T.Color(0x6b6158)
-  return {
-    /** Leaves for the season (weather.js seasonFor): fresh in spring, autumn colours, bare in winter. */
-    setSeason({ bare, autumn, fresh: spring }) {
-      for (const material of treeMaterials) {
-        const { summer, autumn: turned } = material.userData
-        material.color.copy(summer).lerp(fresh, spring * 0.45).lerp(turned, autumn).lerp(bareTwigs, bare * 0.85)
-      }
-    },
-  }
 }
 
 function shell(parent, material, sections) {

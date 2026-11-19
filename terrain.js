@@ -290,8 +290,9 @@ export const WOODS = []
     if (Math.hypot(x - PAD.x, z - PAD.z) < PAD.radius + 14) continue
     if (LANDMARKS.some(l => Math.abs(x - l.x) < l.halfX + 12 && Math.abs(z - l.z) < l.halfZ + 12)) continue
     if (roadDistance(x, z) < 15 || inVillage(x, z)) continue
-    const scale = 2.8 + random() * 5.5
-    const tree = { x, z, y: heightAt(x, z), scale, radius: scale * 0.42, kind: random() < 0.6 ? 0 : 1 }
+    // A tree: its height, and conifer or broadleaf (forest.js dresses it). You hit its trunk.
+    const conifer = random() < 0.12
+    const tree = { x, z, y: heightAt(x, z), h: (conifer ? 11 : 8) + random() * 10, conifer, radius: 0.55 }
     WOODS.push(tree)
     const key = `${Math.floor(x / WOOD_CELL)},${Math.floor(z / WOOD_CELL)}`
     if (!woodGrid.has(key)) woodGrid.set(key, [])

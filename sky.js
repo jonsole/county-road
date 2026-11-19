@@ -420,6 +420,8 @@ export function createSky(scene, { haze = 0.0006, far = 4000, shadowMap = 2048 }
     sun.shadow.bias = -0.0004
     sun.shadow.normalBias = 0.06
     sun.shadow.radius = 3
+    // (Layer 1: drawn into the shadow map only: the distant trees' plain shadow shapes.)
+    sun.shadow.camera.layers.enable(1)
   }
   const shadowCentre = new T.Vector3()
   const lightSpace = new T.Matrix4()

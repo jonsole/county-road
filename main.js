@@ -10,6 +10,7 @@ import { clockHours, dayOfYear, moonAge, seasonFor, weatherFor } from './weather
 import { setGroundSeason } from './landscape.js'
 import { createGlare } from './glare.js'
 import { loadTextures } from './textures.js'
+import { TREE_QUALITY, buildForest } from './forest.js'
 import { HEDGES, POND, WOODS, heightAt, inPond, resolveTrees, slopeAt } from './terrain.js'
 
 const select = id => document.getElementById(id)
@@ -49,7 +50,10 @@ resize()
 // Phones and tablets: a smaller shadow map.
 const sky = createSky(scene, { shadowMap: matchMedia('(pointer: coarse)').matches ? 1024 : 2048 })
 await loadTextures(renderer.capabilities.getMaxAnisotropy() >= 8 ? 8 : 4)
-const world = buildWorld(scene)
+buildWorld(scene)
+// Leafy trees and hedgerows (forest.js): fewer leaf cards and a shorter leafy range on phones.
+const coarse = matchMedia('(pointer: coarse)').matches
+const forest = buildForest(scene, renderer, TREE_QUALITY[coarse ? 'low' : 'medium'])
 const glare = createGlare(view)
 const skySettings = loadSkySettings()
 createSkySettings(select('sky-options'), skySettings, applySky)
@@ -322,7 +326,7 @@ function applySky() {
   sky.setWeather(weatherFor(o, day, hours))
   const season = seasonFor(day)
   setGroundSeason(season)
-  world.setSeason(season)
+  forest.setSeason(day, season)
 }
 
 // Headlights: on by themselves at dusk, at night and in mist or low cloud,
@@ -364,6 +368,8 @@ function updateSky(delta, paused) {
   }
   glare.update(camera, sky.state, delta, skySettings.sunGlare)
   updateHeadlights(delta)
+  forest.update(camera.position)
+  forest.setWind(performance.now() / 1000, Number(skySettings.windSpeed), Number(skySettings.windDir))
   renderer.toneMappingExposure = sky.state.exposure
 }
 
