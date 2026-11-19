@@ -381,6 +381,25 @@ export function addCloudShadows(material) {
 
 // --- The whole sky -------------------------------------------------------------
 
+/**
+ * Fade directional-light shadows out over the outer tenth of the shadow
+ * map, so where the map ends shadows thin away instead of switching off
+ * along a line (three.js's directional getShadow; point lights untouched).
+ */
+let edgesFaded = false
+function fadeShadowEdges() {
+  if (edgesFaded) return
+  edgesFaded = true
+  const chunk = T.ShaderChunk.shadowmap_pars_fragment
+  const split = chunk.indexOf('float getPointShadow')
+  const directional = chunk.slice(0, split).replaceAll('return mix( 1.0, shadow, shadowIntensity );', `{
+        vec2 edge = min(shadowCoord.xy, 1.0 - shadowCoord.xy);
+        shadow = mix(1.0, shadow, smoothstep(0.0, 0.1, min(edge.x, edge.y)));
+      }
+      return mix( 1.0, shadow, shadowIntensity );`)
+  T.ShaderChunk.shadowmap_pars_fragment = directional + chunk.slice(split)
+}
+
 const ORIGIN = new T.Vector3()
 const UP = new T.Vector3(0, 1, 0)
 const NORTH = new T.Vector3(0, 0, 1)
@@ -409,13 +428,18 @@ export function createSky(scene, { haze = 0.0006, far = 4000, shadowMap = 2048 }
   const hemi = new T.HemisphereLight('#cfe3ff', '#4d5a33', 1.1)
   const sun = new T.DirectionalLight('#fff3df', 2.6)
   scene.add(hemi, sun, sun.target)
-  // Shadows from the sun (or moon): a map about 150 m across that follows
-  // the car, sharp near it, redrawn every frame so its own shadow moves.
-  const SHADOW_HALF = 75
+  // Shadows from the sun (or moon): one map that follows the car, redrawn
+  // every frame so its own shadow moves. The bigger the map, the further it
+  // reaches (about 10 cm a pixel; up to 400 m across on High), and shadows
+  // fade out towards its edge rather than stopping at a line.
+  const SHADOW_HALF = Math.min(200, Math.max(50, shadowMap * 0.05))
+  fadeShadowEdges()
+  // (How far ahead of the car to centre it: main.js.)
+  const shadowAhead = SHADOW_HALF * 0.4
   if (shadowMap) {
     sun.castShadow = true
     sun.shadow.mapSize.set(shadowMap, shadowMap)
-    Object.assign(sun.shadow.camera, { left: -SHADOW_HALF, right: SHADOW_HALF, top: SHADOW_HALF, bottom: -SHADOW_HALF, near: 1, far: 700 })
+    Object.assign(sun.shadow.camera, { left: -SHADOW_HALF, right: SHADOW_HALF, top: SHADOW_HALF, bottom: -SHADOW_HALF, near: 1, far: 1200 })
     sun.shadow.camera.updateProjectionMatrix()
     sun.shadow.bias = -0.0004
     sun.shadow.normalBias = 0.06
@@ -566,7 +590,7 @@ export function createSky(scene, { haze = 0.0006, far = 4000, shadowMap = 2048 }
     shadowCentre.y = Math.round(shadowCentre.y / texel) * texel
     shadowCentre.applyMatrix4(lightSpace)
     sun.target.position.copy(shadowCentre)
-    sun.position.copy(shadowCentre).addScaledVector(lightDir, 300)
+    sun.position.copy(shadowCentre).addScaledVector(lightDir, 500)
     sun.target.updateMatrixWorld()
 
     lowCloud.update(dt, wind)
@@ -626,5 +650,6 @@ export function createSky(scene, { haze = 0.0006, far = 4000, shadowMap = 2048 }
   setWind(3, 270)
   setTime(15, 172)
   setClouds(0.35)
+  state.shadowAhead = shadowAhead
   return { setTime, setClouds, setWeather, setWind, setStars, update, state, hemi, sun }
 }

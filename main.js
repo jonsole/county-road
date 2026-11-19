@@ -359,7 +359,7 @@ function updateSky(delta, paused) {
     clockTimer = 30
     applySky()
   }
-  shadowFocus.set(pose.x ?? car.x, carGround, pose.z ?? car.z).addScaledVector(camera.getWorldDirection(lookDirection).setY(0).normalize(), 30)
+  shadowFocus.set(pose.x ?? car.x, carGround, pose.z ?? car.z).addScaledVector(camera.getWorldDirection(lookDirection).setY(0).normalize(), sky.state.shadowAhead)
   sky.update(paused ? 0 : delta, camera, heightAt(camera.position.x, camera.position.z), shadowFocus)
   const far = Math.min(4000, sky.state.visibleFar)
   if (Math.abs(camera.far - far) > 1) {
