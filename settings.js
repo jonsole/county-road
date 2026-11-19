@@ -255,7 +255,8 @@ export function createSettings(config, onChange) {
     select('keyboard-settings').hidden = panel !== 'keyboard'
     select('devices-settings').hidden = panel !== 'devices'
     select('sky-settings').hidden = panel !== 'sky'
-    reset.hidden = panel === 'sky'
+    select('graphics-settings').hidden = panel !== 'graphics'
+    reset.hidden = panel === 'sky' || panel === 'graphics'
     for (const tab of tabs) tab.setAttribute('aria-pressed', String(tab.dataset.panel === panel))
     reset.textContent = panel === 'keyboard' ? 'Restore keyboard defaults' : 'Restore device defaults'
     if (panel === 'keyboard') reset.disabled = false

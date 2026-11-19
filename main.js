@@ -11,6 +11,7 @@ import { setGroundSeason } from './landscape.js'
 import { createGlare } from './glare.js'
 import { loadTextures } from './textures.js'
 import { TREE_QUALITY, buildForest } from './forest.js'
+import { RESOLUTION, SHADOWS, createGraphicsSettings, loadGraphics } from './graphics.js'
 import { HEDGES, POND, WOODS, heightAt, inPond, resolveTrees, slopeAt } from './terrain.js'
 
 const select = id => document.getElementById(id)
@@ -18,7 +19,6 @@ const notice = select('notice')
 const view = select('view')
 const scene = new T.Scene()
 const camera = new T.PerspectiveCamera(56, 1, 0.3, 4000)
-const MAX_RENDER_PIXELS = 1920 * 1080
 let renderer
 try {
   renderer = new T.WebGLRenderer({ antialias: true })
@@ -28,7 +28,9 @@ try {
   throw error
 }
 renderer.toneMapping = T.ACESFilmicToneMapping
-renderer.shadowMap.enabled = true
+// Graphics quality (Settings → Graphics: graphics.js).
+const graphics = loadGraphics()
+renderer.shadowMap.enabled = SHADOWS[graphics.shadows].size > 0
 renderer.shadowMap.type = T.PCFShadowMap
 view.append(renderer.domElement)
 const touch = createTouchDriving(select('game'))
@@ -37,9 +39,8 @@ const drivingAudio = createDrivingAudio(select('open-settings'))
 function resize() {
   const { clientWidth, clientHeight } = view
   if (!clientWidth || !clientHeight) return
-  const mobile = touch.isActive()
-  const pixelBudget = mobile ? 1024 * 768 : MAX_RENDER_PIXELS
-  const pixelRatio = Math.min(devicePixelRatio, mobile ? 1 : 1.25, Math.sqrt(pixelBudget / (clientWidth * clientHeight)))
+  const { ratio, pixels } = RESOLUTION[graphics.resolution]
+  const pixelRatio = Math.min(devicePixelRatio, ratio, Math.sqrt(pixels / (clientWidth * clientHeight)))
   renderer.setDrawingBufferSize(clientWidth, clientHeight, pixelRatio)
   camera.aspect = clientWidth / clientHeight
   camera.updateProjectionMatrix()
@@ -47,16 +48,15 @@ function resize() {
 window.addEventListener('resize', resize)
 resize()
 
-// Phones and tablets: a smaller shadow map.
-const sky = createSky(scene, { shadowMap: matchMedia('(pointer: coarse)').matches ? 1024 : 2048 })
+const sky = createSky(scene, { shadowMap: Math.min(SHADOWS[graphics.shadows].size, renderer.capabilities.maxTextureSize) })
 await loadTextures(renderer.capabilities.getMaxAnisotropy() >= 8 ? 8 : 4)
 buildWorld(scene)
-// Leafy trees and hedgerows (forest.js): fewer leaf cards and a shorter leafy range on phones.
-const coarse = matchMedia('(pointer: coarse)').matches
-const forest = buildForest(scene, renderer, TREE_QUALITY[coarse ? 'low' : 'medium'])
+// Leafy trees and hedgerows (forest.js), at the chosen detail.
+const forest = buildForest(scene, renderer, TREE_QUALITY[graphics.trees])
 const glare = createGlare(view)
 const skySettings = loadSkySettings()
 createSkySettings(select('sky-options'), skySettings, applySky)
+createGraphicsSettings(select('graphics-options'), graphics, resize)
 applySky()
 let clockTimer = 0
 const model = buildCar(scene)

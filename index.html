@@ -52,6 +52,7 @@
         <button type="button" data-panel="keyboard" aria-pressed="true">Keyboard</button>
         <button type="button" data-panel="devices" aria-pressed="false">Controllers &amp; wheels</button>
         <button type="button" data-panel="sky" aria-pressed="false">Sky &amp; weather</button>
+        <button type="button" data-panel="graphics" aria-pressed="false">Graphics</button>
       </nav>
       <section id="keyboard-settings" aria-label="Keyboard bindings">
         <p class="settings-help">Choose a binding and press a key. Backspace clears it.</p>
@@ -67,6 +68,10 @@
       <section id="sky-settings" aria-label="Sky and weather" hidden>
         <p class="settings-help">The English countryside at about 52° north. Saved in this browser.</p>
         <div id="sky-options"></div>
+      </section>
+      <section id="graphics-settings" aria-label="Graphics" hidden>
+        <p class="settings-help">Lower settings run more smoothly on phones and older computers. Saved in this browser.</p>
+        <div id="graphics-options"></div>
       </section>
       <footer class="settings-footer">
         <button id="reset-bindings" type="button">Restore keyboard defaults</button>

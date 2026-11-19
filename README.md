@@ -27,6 +27,8 @@ Open the local URL printed by Vite in a WebGL 2 browser. Connect a standard Xbox
 
 The headlights come on by themselves at dusk, at night, and in mist or low cloud. Switching them by hand overrides that until you reload.
 
+**Settings → Graphics** sets the picture quality: a preset (Auto picks Low on phones and tablets, Medium elsewhere; or Low, Medium, High), or the resolution, shadows and trees one by one. Resolution changes at once; shadows and trees reload the page.
+
 Open **Settings** or press **Esc** to change keyboard bindings and configure connected controllers or wheels. Pick a device, then select an axis or button directly or click **Detect** and move the control. Use the calibration buttons at each named position to set the range for a steering wheel, stick, or pedal. The reading shows the raw input followed by the calibrated input. Bindings are saved in this browser by device. Wheels and pedals need to be exposed by the browser as game controllers.
 
 The sky, weather and countryside come from [RC Flight Sim](https://github.com/jonsole/rc-flight-sim): a daylight sky with the sun placed for the time and date at an English latitude, twilight and a starry night, drifting clouds whose shadows cross the ground, mist and low cloud, and rolling hills of farm fields, hedgerows and copses that fade into the horizon haze. The drivable area stays flat. The **Sky & weather** tab in **Settings** sets:
