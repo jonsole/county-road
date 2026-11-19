@@ -50,7 +50,7 @@ Each tire samples its own contact surface. Asphalt has sharper turn-in and stron
 
 The trees and hedgerows are RC Flight Sim's leafy ones (`forest.js`, `trees/`): a mix of English species, leafy with real branches near the car and pre-drawn pictures in the distance, each species leafing, turning and dropping its leaves in its own time, and swaying in the wind. You hit a tree's trunk and the hedges.
 
-Surface textures (asphalt, grass, mud, gravel, paving) are CC0 photographs from [Poly Haven](https://polyhaven.com); see `public/textures/CREDITS.txt`. The sun and moon cast real shadows around the car.
+Surface textures (asphalt, grass, mud, gravel, paving) are CC0 photographs from [Poly Haven](https://polyhaven.com); see `public/textures/CREDITS.txt`. The sun and moon cast shadows through cascaded shadow maps (`shadows.js`): sharp near the car, coarser further out, reaching 250–900 m depending on **Settings → Graphics → Shadows**.
 
 Run `npm test` for simulation and input checks, and `npm run build` for the static build.
 

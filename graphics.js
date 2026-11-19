@@ -12,12 +12,12 @@ export const RESOLUTION = {
   native: { label: "Full (the screen's own)", ratio: Infinity, pixels: Infinity },
 }
 
-/** Shadow map size (0: no shadows). */
+/** Sun shadows (shadows.js SHADOW_LEVELS: how sharp and how far they reach). */
 export const SHADOWS = {
-  off: { label: 'Off', size: 0 },
-  low: { label: 'Low', size: 1024 },
-  medium: { label: 'Medium', size: 2048 },
-  high: { label: 'High (sharpest)', size: 4096 },
+  off: { label: 'Off' },
+  low: { label: 'Low (to 250 m)' },
+  medium: { label: 'Medium (to 500 m)' },
+  high: { label: 'High (to 900 m)' },
 }
 
 /** Tree detail: forest.js TREE_QUALITY. */

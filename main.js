@@ -11,7 +11,8 @@ import { setGroundSeason } from './landscape.js'
 import { createGlare } from './glare.js'
 import { loadTextures } from './textures.js'
 import { TREE_QUALITY, buildForest } from './forest.js'
-import { RESOLUTION, SHADOWS, createGraphicsSettings, loadGraphics } from './graphics.js'
+import { RESOLUTION, createGraphicsSettings, loadGraphics } from './graphics.js'
+import { SHADOW_LEVELS, createShadows } from './shadows.js'
 import { HEDGES, POND, WOODS, heightAt, inPond, resolveTrees, slopeAt } from './terrain.js'
 
 const select = id => document.getElementById(id)
@@ -30,7 +31,9 @@ try {
 renderer.toneMapping = T.ACESFilmicToneMapping
 // Graphics quality (Settings → Graphics: graphics.js).
 const graphics = loadGraphics()
-renderer.shadowMap.enabled = SHADOWS[graphics.shadows].size > 0
+renderer.shadowMap.enabled = graphics.shadows !== 'off'
+// Cascaded sun shadows (shadows.js), made once the world is built.
+let shadows = null
 renderer.shadowMap.type = T.PCFShadowMap
 view.append(renderer.domElement)
 const touch = createTouchDriving(select('game'))
@@ -44,11 +47,12 @@ function resize() {
   renderer.setDrawingBufferSize(clientWidth, clientHeight, pixelRatio)
   camera.aspect = clientWidth / clientHeight
   camera.updateProjectionMatrix()
+  shadows?.resize()
 }
 window.addEventListener('resize', resize)
 resize()
 
-const sky = createSky(scene, { shadowMap: Math.min(SHADOWS[graphics.shadows].size, renderer.capabilities.maxTextureSize) })
+const sky = createSky(scene)
 await loadTextures(renderer.capabilities.getMaxAnisotropy() >= 8 ? 8 : 4)
 buildWorld(scene)
 // Leafy trees and hedgerows (forest.js), at the chosen detail.
@@ -60,6 +64,11 @@ createGraphicsSettings(select('graphics-options'), graphics, resize)
 applySky()
 let clockTimer = 0
 const model = buildCar(scene)
+if (graphics.shadows !== 'off') {
+  shadows = createShadows(scene, camera, sky, SHADOW_LEVELS[graphics.shadows])
+  shadows.setupScene()
+  shadows.setupMaterials(forest.materials)
+}
 model.root.traverse(object => {
   if (object.isMesh && !object.material.transparent) object.castShadow = true
 })
@@ -135,8 +144,6 @@ const previousCar = { ...car }
 const pose = {}
 let input = controls()
 let cameraYaw
-const shadowFocus = new T.Vector3()
-const lookDirection = new T.Vector3()
 let cameraHeight
 let carGround = 0
 let noticeUntil = 0
@@ -359,13 +366,14 @@ function updateSky(delta, paused) {
     clockTimer = 30
     applySky()
   }
-  shadowFocus.set(pose.x ?? car.x, carGround, pose.z ?? car.z).addScaledVector(camera.getWorldDirection(lookDirection).setY(0).normalize(), sky.state.shadowAhead)
-  sky.update(paused ? 0 : delta, camera, heightAt(camera.position.x, camera.position.z), shadowFocus)
+  sky.update(paused ? 0 : delta, camera, heightAt(camera.position.x, camera.position.z))
   const far = Math.min(4000, sky.state.visibleFar)
   if (Math.abs(camera.far - far) > 1) {
     camera.far = far
     camera.updateProjectionMatrix()
+    shadows?.resize()
   }
+  shadows?.update()
   glare.update(camera, sky.state, delta, skySettings.sunGlare)
   updateHeadlights(delta)
   forest.update(camera.position)

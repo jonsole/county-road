@@ -336,6 +336,8 @@ export function buildForest(scene, renderer, quality = TREE_QUALITY.medium) {
   }), BUSH_SEEDS.map(seed => blobCrown(seed)))
 
   return {
+    /** Every material the trees and bushes use (some meshes are only made when first needed). */
+    materials: [leafMat, cardMat, barkMat, trunkMat, plainWoodMat, closeWoodMat, closeTrunkMat, impostorMat],
     /** Leafy crowns follow the camera: call every frame. */
     update(position) {
       for (const lod of lods) if (lod.update(position.x, position.z)) syncTwigs(lod)
